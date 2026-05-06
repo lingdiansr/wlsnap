@@ -1258,6 +1258,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 编辑器视口 | zoom + pan | 长截图或高 DPI 截图下，画布可能超出屏幕，必须支持缩放和平移 |
 | 字体 | fontdb + rustybuzz | fontdb 扫描系统字体无依赖；rustybuzz 纯 Rust，支持复杂脚本 shaping |
 | 长截图预览 | 缩略图传输 | 避免每帧在 channel 中传递数 MB 的完整图像 |
+| eframe 辅助功能 | 禁用 `accesskit` | `ashpd` 启用 zbus 的 tokio 特性后，accesskit 启动的线程无 tokio runtime 导致 panic；禁用后可避免冲突 |
 | exec 安全 | shell-words + 直接 exec | 防止命令注入攻击 |
 
 ---
