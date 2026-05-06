@@ -2,6 +2,7 @@
 
 pub mod pixmap;
 pub mod transform;
+pub mod history;
 
 /// Logical coordinate (DPI-independent).
 #[derive(Debug, Clone, Copy, PartialEq)]
