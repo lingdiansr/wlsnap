@@ -1,0 +1,30 @@
+[package]
+name = "wlsnap"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+arboard = "3.6.1"
+ashpd = "0.13.10"
+bitflags = "2.11.1"
+chrono = "0.4.44"
+clap = { version = "4.6.1", features = ["derive"] }
+dirs = "6.0.0"
+eframe = "0.34.2"
+egui = "0.34.2"
+fontdb = "0.23.0"
+image = { version = "0.25.10", features = ["png", "jpeg", "webp"] }
+rustybuzz = "0.20.1"
+serde = { version = "1.0.228", features = ["derive"] }
+shell-words = "1.1.1"
+smithay-client-toolkit = "0.20.0"
+thiserror = "2.0.18"
+tiny-skia = "0.12.0"
+tokio = { version = "1.52.2", features = ["full"] }
+toml = "1.1.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.23.1", features = ["v4"] }
+wayland-client = "0.31.14"
+wayland-protocols = { version = "0.32.12", features = ["client", "unstable"] }

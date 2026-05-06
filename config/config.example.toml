@@ -1,0 +1,119 @@
+# wlsnap 配置文件示例
+# 放置路径: ~/.config/wlsnap/config.toml
+# 首次启动时若配置文件不存在，wlsnap 会自动生成一份默认配置
+
+[general]
+# 截图后的默认操作
+# 可选值:
+#   "edit"      - 打开内置标注编辑器
+#   "save"      - 直接保存到 save_dir 指定目录
+#   "clipboard" - 复制到剪贴板
+#   "pipe"      - 输出到 stdout（供外部程序管道接收，如: wlsnap --area --stdout | xclip -t image/png）
+#   "ask"       - 每次截图后弹出选择对话框
+post_capture = "edit"
+
+# 截图保存目录
+# 支持占位符:
+#   {HOME}      - 用户主目录
+#   {DATE}      - 当前日期 (YYYY-MM-DD)
+#   {TIME}      - 当前时间 (HH-MM-SS)
+save_dir = "{HOME}/Pictures/Screenshots"
+
+# 文件名模板（不含扩展名）
+# 可用占位符: {date}, {time}, {mode}, {timestamp}
+# {mode} 会被替换为 full / area / window / output / scroll
+filename_template = "wlsnap_{date}_{time}_{mode}"
+
+# 保存图片格式: "png", "jpeg", "webp"
+format = "png"
+
+# JPEG 编码质量 (1-100)，仅当 format = "jpeg" 时生效
+jpeg_quality = 90
+
+[editor]
+# 默认画笔/描边颜色 (HEX 格式)
+stroke_color = "#FF5722"
+
+# 默认描边粗细 (像素)
+stroke_width = 3.0
+
+# 撤销栈最大深度（过多会占用内存）
+undo_depth = 50
+
+# 马赛克块大小（像素，越大越模糊）
+mosaic_size = 10
+
+# 默认字体（留空则使用系统默认无衬线字体）
+# font_family = "Noto Sans CJK SC"
+font_family = ""
+
+# 默认文字标注字号
+font_size = 16.0
+
+[pin]
+# 贴图窗口默认缩放比例 (1.0 = 原始大小)
+default_scale = 1.0
+
+# 贴图窗口不透明度 (0.0 - 1.0)
+opacity = 0.95
+
+# 是否启用右键上下文菜单
+show_context_menu = true
+
+# 是否允许鼠标拖动贴图窗口
+enable_drag = true
+
+# 是否允许滚轮缩放贴图
+enable_scroll_zoom = true
+
+[scrolling]
+# 自动长截图模式: 每次滚动后的等待间隔 (毫秒)
+# 值太小可能导致捕获时画面尚未稳定
+auto_scroll_interval_ms = 500
+
+# 手动长截图模式: 后台定时捕获间隔 (毫秒)
+# 值太小会导致 Portal 频繁弹窗（GNOME/KDE）
+manual_capture_interval_ms = 500
+
+# 拼接算法
+#   "column_sampling" - 默认，三列灰度 MAD 匹配，速度快
+#   "orb"             - ORB 特征点 + RANSAC，抗重复内容干扰，CPU 开销大
+stitch_algorithm = "column_sampling"
+
+# 手动模式下，连续多少帧未检测到位移时提示"是否已完成？"
+# 设为 0 则禁用自动提示
+idle_stop_threshold = 3
+
+# 长截图时是否显示实时预览窗口（已捕获帧数 / 预估高度）
+preview_enabled = true
+
+[shortcuts]
+# 应用内快捷键（仅在 wlsnap 窗口获得焦点时生效）
+# 语法: "Ctrl+S", "Alt+F4", "Shift+Z", "Ctrl+Shift+Z" 等
+save = "Ctrl+S"
+undo = "Ctrl+Z"
+redo = "Ctrl+Shift+Z"
+copy = "Ctrl+C"
+cancel = "Esc"
+confirm = "Enter"
+switch_mode = "Tab"
+zoom_in = "Ctrl++"
+zoom_out = "Ctrl+-"
+reset_zoom = "Ctrl+0"
+
+[advanced]
+# 调试模式: 开启后在终端输出详细协议交互信息
+debug = false
+
+# 日志级别: "error", "warn", "info", "debug", "trace"
+log_level = "info"
+
+# 截图时是否包含鼠标光标（需后端支持）
+include_cursor = false
+
+# GNOME / KDE Portal: 是否持久化 restore token 以实现静默授权
+# 关闭后每次 Portal 截图都会弹出权限确认窗口
+persist_portal_token = true
+
+# restore token 自定义存储路径（留空则使用默认位置）
+# portal_restore_token_path = ""
