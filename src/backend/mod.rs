@@ -6,6 +6,7 @@
 
 mod capabilities;
 mod protocol;
+pub mod wlr;
 
 pub use capabilities::CaptureCapabilities;
 pub use protocol::ProtocolProbe;

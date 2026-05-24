@@ -4804,10 +4804,13 @@ dependencies = [
  "egui",
  "fontdb",
  "image",
+ "libc",
+ "memmap2",
  "rustybuzz",
  "serde",
  "shell-words",
  "smithay-client-toolkit 0.20.0",
+ "tempfile",
  "thiserror 2.0.18",
  "tiny-skia",
  "tokio",
@@ -4817,6 +4820,7 @@ dependencies = [
  "uuid",
  "wayland-client",
  "wayland-protocols",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]
