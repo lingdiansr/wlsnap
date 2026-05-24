@@ -28,7 +28,7 @@ pub struct WlsnapApp {
     pub backend_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     pub backend_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
     pub current_output: Option<()>, // placeholder
-    pub all_outputs: Vec<()>,      // placeholder
+    pub all_outputs: Vec<()>,       // placeholder
     // Keep runtime alive for the duration of the app
     _runtime: tokio::runtime::Runtime,
 }
@@ -113,9 +113,7 @@ mod tests {
         let config = Config::default();
         let app = WlsnapApp::new(config);
         app.backend_tx
-            .send(BackendEvent::Error {
-                msg: "test".into(),
-            })
+            .send(BackendEvent::Error { msg: "test".into() })
             .unwrap();
         // Just verify the channel works
     }

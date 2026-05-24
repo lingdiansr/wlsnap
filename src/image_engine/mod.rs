@@ -1,8 +1,8 @@
 //! Core geometry types and coordinate conversion for the image engine.
 
+pub mod history;
 pub mod pixmap;
 pub mod transform;
-pub mod history;
 
 /// Logical coordinate (DPI-independent).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -258,7 +258,15 @@ mod tests {
 
     #[test]
     fn color_constants() {
-        assert_eq!(Color::BLACK, Color { r: 0, g: 0, b: 0, a: 255 });
+        assert_eq!(
+            Color::BLACK,
+            Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255
+            }
+        );
         assert_eq!(
             Color::WHITE,
             Color {
@@ -270,7 +278,12 @@ mod tests {
         );
         assert_eq!(
             Color::TRANSPARENT,
-            Color { r: 0, g: 0, b: 0, a: 0 }
+            Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0
+            }
         );
     }
 }

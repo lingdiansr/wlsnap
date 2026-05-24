@@ -103,7 +103,6 @@ impl HistoryStack {
 mod tests {
     use super::*;
 
-
     /// Fills a rectangle with opaque red.
     struct FillRedCommand {
         rect: tiny_skia::IntRect,
@@ -113,14 +112,24 @@ mod tests {
         fn execute(&self, canvas: &mut tiny_skia::Pixmap) {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(255, 0, 0, 255);
-            canvas.fill_rect(self.rect.to_rect(), &paint, tiny_skia::Transform::identity(), None);
+            canvas.fill_rect(
+                self.rect.to_rect(),
+                &paint,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
 
         fn undo(&self, canvas: &mut tiny_skia::Pixmap) {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(0, 0, 0, 0);
             paint.blend_mode = tiny_skia::BlendMode::Source;
-            canvas.fill_rect(self.rect.to_rect(), &paint, tiny_skia::Transform::identity(), None);
+            canvas.fill_rect(
+                self.rect.to_rect(),
+                &paint,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
 
         fn describe(&self) -> &'static str {
@@ -137,21 +146,30 @@ mod tests {
         fn execute(&self, canvas: &mut tiny_skia::Pixmap) {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(0, 0, 255, 255);
-            canvas.fill_rect(self.rect.to_rect(), &paint, tiny_skia::Transform::identity(), None);
+            canvas.fill_rect(
+                self.rect.to_rect(),
+                &paint,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
 
         fn undo(&self, canvas: &mut tiny_skia::Pixmap) {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(0, 0, 0, 0);
             paint.blend_mode = tiny_skia::BlendMode::Source;
-            canvas.fill_rect(self.rect.to_rect(), &paint, tiny_skia::Transform::identity(), None);
+            canvas.fill_rect(
+                self.rect.to_rect(),
+                &paint,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
 
         fn describe(&self) -> &'static str {
             "fill blue"
         }
     }
-
 
     fn black_pixmap(width: u32, height: u32) -> tiny_skia::Pixmap {
         let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();

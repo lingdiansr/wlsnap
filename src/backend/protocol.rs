@@ -1,8 +1,8 @@
 use tracing::{debug, warn};
 use wayland_client::{
-    globals::{registry_queue_init, GlobalListContents},
-    protocol::wl_registry::WlRegistry,
     Connection, Dispatch, QueueHandle,
+    globals::{GlobalListContents, registry_queue_init},
+    protocol::wl_registry::WlRegistry,
 };
 
 use smithay_client_toolkit::registry::RegistryState;
@@ -149,8 +149,8 @@ fn check_portal() -> bool {
         .map(|rt| {
             rt.block_on(async {
                 match ashpd::zbus::Connection::session().await {
-                    Ok(conn) => {
-                        conn.call_method(
+                    Ok(conn) => conn
+                        .call_method(
                             Some("org.freedesktop.portal.Desktop"),
                             "/org/freedesktop/portal/desktop",
                             Some("org.freedesktop.DBus.Peer"),
@@ -158,8 +158,7 @@ fn check_portal() -> bool {
                             &(),
                         )
                         .await
-                        .is_ok()
-                    }
+                        .is_ok(),
                     Err(_) => false,
                 }
             })

@@ -52,8 +52,7 @@ impl Config {
     /// 从指定路径加载配置
     pub fn load_from(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        toml::from_str(&content)
-            .map_err(|e| WlsnapError::Config(format!("parse error: {e}")))
+        toml::from_str(&content).map_err(|e| WlsnapError::Config(format!("parse error: {e}")))
     }
 
     /// 保存配置到默认路径
