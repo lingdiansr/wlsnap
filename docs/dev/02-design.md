@@ -546,6 +546,10 @@ Idle ──► SelectingRegion ──► Capturing ──► Editing ──► C
   ├──► Scrolling ──► Editing / Save / Clipboard / Pipe ──► Idle
   │
   └──► Pinning (打开已有 Pin 窗口，不影响主状态)
+
+> **v0.1.0 状态机简化**: v0.1.0 不涉及 `SelectingRegion`、`SelectingWindow`、`Editing`、
+> `Scrolling`、`ChoosingAction` 状态。截图完成后直接执行输出动作（Save/Clipboard/Pipe/Exec），
+> 不进入编辑器。`Capturing` 状态用于显示进度/等待提示，完成后立即回到 `Idle`。
 ```
 
 ### 5.3 eframe 事件循环模板
@@ -1205,19 +1209,36 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 
 ## 17. 各 Phase 里程碑与交付物
 
-### Phase 1: MVP（wlroots 系全功能）
+### v0.1.0 ── CLI 截图闭环（M1）
+
+| 模块 | 交付内容 | 说明 |
+|------|----------|------|
+| backend | `wlr-screencopy` 后端；协议探测框架 | 仅支持 wlroots 系 compositor |
+| capture | 单屏/全屏捕获；多屏拼接（`--full-all`）；硬编码区域（`--area`） | `--area` 不启动 GUI 选区，接受坐标参数或后续由外部工具提供 |
+| ui | eframe 最小窗口（仅用于事件循环，无实际 GUI 交互） | v0.1.0 不显示编辑器、选区、Pin 窗口 |
+| output_manager | 保存（PNG/JPEG/WebP）；剪贴板（arboard）；stdout 输出；`--exec` | 完整输出分发 |
+| config | TOML 解析；默认值；路径占位符展开 | |
+| cli | `--full`, `--full-all`, `--area`, `--screen`, `--stdout`, `-o`, `--exec`, `--clipboard` | |
+
+### v0.2.0 ── 选区+编辑（M2）
 
 | 模块 | 交付内容 |
 |------|----------|
-| backend | `wlr-screencopy` 后端；协议探测框架；`virtual_pointer` 注入 |
-| capture | eframe 全屏选区（当前屏幕）；单屏/全屏捕获；多屏拼接（`--full-all`） |
-| ui | egui 编辑器（zoom/pan/pen/rect/arrow/text/mosaic/blur）；撤销栈；eframe 全屏选区遮罩 |
-| image_engine | tiny-skia 绘制；image crate 编码；fontdb 系统字体枚举；脏矩形增量更新 |
-| output_manager | 保存（PNG/JPEG/WebP）；剪贴板（arboard）；stdout 输出；`--exec` |
-| config | TOML 解析；默认值；路径占位符展开 |
-| scrolling | Auto 长截图（virtual-pointer + Column Sampling） |
+| ui | eframe 全屏选区遮罩；egui 编辑器（zoom/pan/pen/rect/arrow/text/mosaic/blur） |
+| image_engine | tiny-skia 绘制；fontdb 系统字体枚举；脏矩形增量更新 |
+| capture | eframe 全屏选区（当前屏幕）；窗口截图枚举 |
+| single_instance | Unix domain socket 单实例 + 命令转发 |
+| cli | 新增 `--window`, `--pin`（此时 `--pin` 打开编辑器中的贴图预览） |
+
+### v0.3.0 ── 高级功能（M3）
+
+| 模块 | 交付内容 |
+|------|----------|
 | pinner | eframe 无边框置顶贴图窗口 |
-| cli | `--full`, `--full-all`, `--area`, `--window`, `--pin`, `--scroll-auto` |
+| scrolling | Auto 长截图（virtual-pointer + Column Sampling）；Manual 长截图；实时预览 |
+| cli | 新增 `--scroll-auto`, `--scroll-manual` |
+
+### Phase 2: GNOME / KDE 兼容（v0.4.0, M4）
 
 ### Phase 2: GNOME / KDE 兼容
 
@@ -1260,6 +1281,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 长截图预览 | 缩略图传输 | 避免每帧在 channel 中传递数 MB 的完整图像 |
 | eframe 辅助功能 | 禁用 `accesskit` | `ashpd` 启用 zbus 的 tokio 特性后，accesskit 启动的线程无 tokio runtime 导致 panic；禁用后可避免冲突 |
 | exec 安全 | shell-words + 直接 exec | 防止命令注入攻击 |
+| 版本策略 | v0.1.0 = M1（CLI截图），v0.2.0 = M2（编辑），v0.3.0 = M3（Pin+长截图） | 先发布最小可用版本，快速获取用户反馈；编辑器/标注作为 v0.2.0 核心卖点 |
 
 ---
 
