@@ -6,13 +6,15 @@
 use std::os::unix::io::AsFd;
 
 use image::RgbaImage;
-use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::delegate_output;
+use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use tokio::task;
 use tracing::{debug, warn};
-use wayland_client::globals::{registry_queue_init, GlobalListContents};
+use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::protocol::{wl_buffer::WlBuffer, wl_output::WlOutput, wl_shm::WlShm, wl_shm_pool::WlShmPool};
+use wayland_client::protocol::{
+    wl_buffer::WlBuffer, wl_output::WlOutput, wl_shm::WlShm, wl_shm_pool::WlShmPool,
+};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1},
@@ -76,7 +78,8 @@ impl OutputHandler for CaptureState {
 
     fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {}
 
-    fn output_destroyed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {}
+    fn output_destroyed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {
+    }
 }
 
 delegate_output!(CaptureState);
@@ -108,22 +111,23 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for CaptureState {
                 width,
                 height,
                 stride,
-            } => {
-                match format {
-                    WEnum::Value(fmt) => {
-                        debug!("screencopy buffer: {:?} {}x{} stride={}", fmt, width, height, stride);
-                        state.frame_state.buffer_info = Some(BufferInfo {
-                            format: fmt,
-                            width,
-                            height,
-                            stride,
-                        });
-                    }
-                    WEnum::Unknown(v) => {
-                        warn!("screencopy returned unknown buffer format: {}", v);
-                    }
+            } => match format {
+                WEnum::Value(fmt) => {
+                    debug!(
+                        "screencopy buffer: {:?} {}x{} stride={}",
+                        fmt, width, height, stride
+                    );
+                    state.frame_state.buffer_info = Some(BufferInfo {
+                        format: fmt,
+                        width,
+                        height,
+                        stride,
+                    });
                 }
-            }
+                WEnum::Unknown(v) => {
+                    warn!("screencopy returned unknown buffer format: {}", v);
+                }
+            },
             zwlr_screencopy_frame_v1::Event::Flags { .. } => {
                 // Flags are received but not needed for the skeleton.
             }
@@ -227,11 +231,10 @@ fn capture_output_blocking(
         .roundtrip(&mut state)
         .map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
 
-    let buffer_info = state
-        .frame_state
-        .buffer_info
-        .clone()
-        .ok_or_else(|| WlsnapError::WaylandConnect("compositor did not send buffer info".into()))?;
+    let buffer_info =
+        state.frame_state.buffer_info.clone().ok_or_else(|| {
+            WlsnapError::WaylandConnect("compositor did not send buffer info".into())
+        })?;
 
     // We only support the two common little-endian 32-bit formats.
     let fix_alpha = match buffer_info.format {
@@ -354,8 +357,8 @@ mod tests {
 
         // We can't create a Connection without WAYLAND_DISPLAY, so we test
         // the blocking helper directly by trying to connect first.
-        let result = Connection::connect_to_env()
-            .map_err(|e| WlsnapError::WaylandConnect(e.to_string()));
+        let result =
+            Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()));
 
         if let Some(v) = old {
             unsafe {

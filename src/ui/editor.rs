@@ -129,11 +129,8 @@ impl Editor {
             [self.image.width() as usize, self.image.height() as usize],
             self.image.as_raw(),
         );
-        self.texture = Some(ctx.load_texture(
-            "editor_image",
-            color_image,
-            egui::TextureOptions::LINEAR,
-        ));
+        self.texture =
+            Some(ctx.load_texture("editor_image", color_image, egui::TextureOptions::LINEAR));
     }
 }
 

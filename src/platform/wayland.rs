@@ -3,10 +3,10 @@ use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::{delegate_output, delegate_registry, registry_handlers};
 use tracing::{debug, warn};
 use wayland_client::protocol::wl_output::WlOutput;
-use wayland_client::{globals::registry_queue_init, Connection, QueueHandle};
+use wayland_client::{Connection, QueueHandle, globals::registry_queue_init};
 
-use crate::error::{Result, WlsnapError};
 use super::output_info::{LogicalPoint, LogicalRect, OutputInfo, OutputTransform};
+use crate::error::{Result, WlsnapError};
 
 /// Minimal application state required by sctk 0.20 to enumerate outputs.
 struct AppState {
@@ -23,12 +23,7 @@ impl OutputHandler for AppState {
 
     fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {}
 
-    fn output_destroyed(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _output: WlOutput,
-    ) {
+    fn output_destroyed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {
     }
 }
 
@@ -53,12 +48,11 @@ pub fn enumerate_outputs() -> Result<Vec<OutputInfo>> {
         return Ok(Vec::new());
     }
 
-    let conn = Connection::connect_to_env()
-        .map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
+    let conn =
+        Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
 
-    let (globals, mut event_queue) =
-        registry_queue_init::<AppState>(&conn)
-            .map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
+    let (globals, mut event_queue) = registry_queue_init::<AppState>(&conn)
+        .map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
 
     let qh = event_queue.handle();
     let registry_state = RegistryState::new(&globals);
@@ -95,15 +89,15 @@ pub fn enumerate_outputs() -> Result<Vec<OutputInfo>> {
                     Some(mode) => (mode.dimensions.0 as f64, mode.dimensions.1 as f64),
                     None => (0.0, 0.0),
                 };
-                (px_w / info.scale_factor as f64, px_h / info.scale_factor as f64)
+                (
+                    px_w / info.scale_factor as f64,
+                    px_h / info.scale_factor as f64,
+                )
             }
         };
 
         let logical_geometry = LogicalRect {
-            min: LogicalPoint {
-                x: loc_x,
-                y: loc_y,
-            },
+            min: LogicalPoint { x: loc_x, y: loc_y },
             max: LogicalPoint {
                 x: loc_x + logical_w,
                 y: loc_y + logical_h,

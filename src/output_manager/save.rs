@@ -1,4 +1,4 @@
-use crate::config::{expand_placeholders, GeneralConfig, ImageFormat};
+use crate::config::{GeneralConfig, ImageFormat, expand_placeholders};
 use crate::error::Result;
 use std::fs;
 use std::io::BufWriter;
@@ -34,8 +34,10 @@ pub fn save_image(image: &image::RgbaImage, config: &GeneralConfig, mode: &str) 
         }
         ImageFormat::Jpeg => {
             let rgb_image = image::DynamicImage::ImageRgba8(image.clone()).to_rgb8();
-            let encoder =
-                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, config.jpeg_quality);
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
+                &mut writer,
+                config.jpeg_quality,
+            );
             rgb_image.write_with_encoder(encoder)?;
         }
         ImageFormat::WebP => {
@@ -66,10 +68,10 @@ mod tests {
             4,
             4,
             vec![
-                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 255,
-                255, 0, 255, 255, 255, 128, 128, 128, 255, 64, 64, 64, 255, 255, 255, 255, 255,
-                0, 0, 0, 255, 255, 128, 0, 255, 0, 128, 255, 255, 128, 0, 128, 255, 0, 255, 128,
-                255, 128, 128, 128, 255, 200, 200, 200, 255,
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255,
+                0, 255, 255, 255, 128, 128, 128, 255, 64, 64, 64, 255, 255, 255, 255, 255, 0, 0, 0,
+                255, 255, 128, 0, 255, 0, 128, 255, 255, 128, 0, 128, 255, 0, 255, 128, 255, 128,
+                128, 128, 255, 200, 200, 200, 255,
             ],
         )
         .unwrap()
@@ -150,7 +152,11 @@ mod tests {
 
         let path = save_image(&dummy_image(), &config, "my_mode").unwrap();
         let name = path.file_stem().unwrap().to_str().unwrap();
-        assert!(name.contains("my_mode"), "expected mode placeholder in {}", name);
+        assert!(
+            name.contains("my_mode"),
+            "expected mode placeholder in {}",
+            name
+        );
     }
 
     #[test]

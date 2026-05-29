@@ -1,4 +1,6 @@
 pub mod backend;
+pub mod capture;
+pub mod cli;
 pub mod config;
 pub mod constants;
 pub mod error;

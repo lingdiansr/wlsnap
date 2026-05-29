@@ -1,5 +1,9 @@
-use wlsnap::config::Config;
 use std::sync::Arc;
+
+use wlsnap::capture::CapturedImage;
+use wlsnap::cli::{Cli, PostCaptureAction};
+use wlsnap::config::Config;
+use wlsnap::output_manager::{OutputAction, dispatch};
 
 /// 全局应用状态机
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,9 +18,14 @@ pub enum AppState {
 }
 
 /// 后端 → UI 的事件通道
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum BackendEvent {
-    CaptureFinished,
+    /// Screenshot capture completed successfully.
+    CaptureFinished {
+        captured: CapturedImage,
+        mode: String,
+    },
+    /// Backend encountered an error.
     Error { msg: String },
 }
 
@@ -29,6 +38,16 @@ pub struct WlsnapApp {
     pub backend_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
     pub current_output: Option<()>, // placeholder
     pub all_outputs: Vec<()>,       // placeholder
+
+    /// The CLI arguments that triggered this session (for v0.1.0 CLI-driven flow)
+    pub cli: Option<Cli>,
+
+    /// Whether the capture has been initiated (to avoid double-spawning)
+    capture_initiated: bool,
+
+    /// Whether output has been dispatched (to know when to exit)
+    output_dispatched: bool,
+
     // Keep runtime alive for the duration of the app
     _runtime: tokio::runtime::Runtime,
 }
@@ -46,43 +65,351 @@ impl WlsnapApp {
             backend_tx,
             current_output: None,
             all_outputs: Vec::new(),
+            cli: None,
+            capture_initiated: false,
+            output_dispatched: false,
             _runtime: runtime,
         }
+    }
+
+    /// Create a new app instance that will be driven by CLI arguments.
+    pub fn new_with_cli(config: Config, cli: Cli) -> Self {
+        let mut app = Self::new(config);
+        app.cli = Some(cli);
+        app
+    }
+
+    /// Determine the output action based on CLI flags and config.
+    ///
+    /// Priority (highest first):
+    /// 1. `--stdout`  → Pipe
+    /// 2. `--exec CMD` → Exec(cmd)
+    /// 3. `--clipboard` → Clipboard
+    /// 4. `-o PATH` / `--silent` → Save
+    /// 5. `--post ACTION` → override config
+    /// 6. `general.post_capture` config → default action
+    fn determine_output_action(&self) -> OutputAction {
+        let cli = self
+            .cli
+            .as_ref()
+            .expect("determine_output_action called without CLI");
+
+        if cli.stdout {
+            return OutputAction::Pipe;
+        }
+        if let Some(ref cmd) = cli.exec {
+            return OutputAction::Exec(cmd.clone());
+        }
+        if cli.clipboard {
+            return OutputAction::Clipboard;
+        }
+        if cli.output.is_some() || cli.silent {
+            return OutputAction::Save;
+        }
+        if let Some(post) = cli.post {
+            return Self::post_action_to_output_action(post);
+        }
+
+        Self::parse_post_capture_config(&self.config.general.post_capture)
+    }
+
+    /// Map a CLI `PostCaptureAction` to an `OutputAction`.
+    ///
+    /// For v0.1.0, `Edit` and `Ask` are mapped to `Save` because there is no
+    /// GUI editor yet.
+    fn post_action_to_output_action(action: PostCaptureAction) -> OutputAction {
+        match action {
+            PostCaptureAction::Edit => OutputAction::Save,
+            PostCaptureAction::Save => OutputAction::Save,
+            PostCaptureAction::Clipboard => OutputAction::Clipboard,
+            PostCaptureAction::Pipe => OutputAction::Pipe,
+            PostCaptureAction::Ask => OutputAction::Save,
+        }
+    }
+
+    /// Parse the `general.post_capture` config string into an `OutputAction`.
+    fn parse_post_capture_config(value: &str) -> OutputAction {
+        match value.to_lowercase().as_str() {
+            "save" => OutputAction::Save,
+            "clipboard" => OutputAction::Clipboard,
+            "pipe" => OutputAction::Pipe,
+            "edit" | "ask" => OutputAction::Save,
+            _ => OutputAction::Save,
+        }
+    }
+
+    /// Spawn an async tokio task that performs the screenshot capture.
+    fn spawn_capture_task(
+        &self,
+        cli: Cli,
+        config: Arc<Config>,
+        tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
+    ) {
+        let overlay_cursor = config.advanced.include_cursor || cli.cursor;
+        let mode_name = cli.mode.selected_mode_name().to_string();
+
+        self._runtime.spawn(async move {
+            let result = if cli.mode.full_all {
+                wlsnap::capture::output::capture_all_screens(overlay_cursor).await
+            } else {
+                // --full, --screen, --area, --window, or default (no mode) all
+                // map to capturing the current screen for v0.1.0.
+                wlsnap::capture::output::capture_current_screen(overlay_cursor).await
+            };
+
+            match result {
+                Ok(captured) => {
+                    let _ = tx.send(BackendEvent::CaptureFinished {
+                        captured,
+                        mode: mode_name,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(BackendEvent::Error {
+                        msg: format!("{e}"),
+                    });
+                }
+            }
+        });
     }
 }
 
 impl eframe::App for WlsnapApp {
-    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Process backend events
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ------------------------------------------------------------------
+        // 1. Initiate capture if we have CLI args and haven't started yet
+        // ------------------------------------------------------------------
+        if matches!(self.state, AppState::Idle) && self.cli.is_some() && !self.capture_initiated {
+            self.capture_initiated = true;
+            self.state = AppState::Capturing;
+
+            let tx = self.backend_tx.clone();
+            let cli = self.cli.take().unwrap();
+            let config = self.config.clone();
+
+            self.spawn_capture_task(cli, config, tx);
+        }
+
+        // ------------------------------------------------------------------
+        // 2. Process backend events
+        // ------------------------------------------------------------------
         while let Ok(event) = self.backend_rx.try_recv() {
             match event {
-                BackendEvent::CaptureFinished => {
-                    self.state = AppState::Editing;
+                BackendEvent::CaptureFinished { captured, mode } => {
+                    self.state = AppState::Idle;
+                    self.output_dispatched = true;
+
+                    let action = self.determine_output_action();
+                    let general_config = &self.config.general;
+
+                    match dispatch(&captured.image, action, general_config, &mode) {
+                        Ok(path) => {
+                            tracing::info!("Output dispatched: {:?}", path);
+                        }
+                        Err(e) => {
+                            tracing::error!("Output dispatch failed: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+
+                    // Exit after output is dispatched (v0.1.0 CLI mode)
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 BackendEvent::Error { msg } => {
-                    tracing::error!("Backend error: {msg}");
+                    tracing::error!("Backend error: {}", msg);
+                    std::process::exit(1);
                 }
             }
+        }
+
+        // ------------------------------------------------------------------
+        // 3. If output was dispatched but we're still running, force close
+        // ------------------------------------------------------------------
+        if self.output_dispatched {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let state_label = match self.state {
-            AppState::Idle => "State: Idle",
-            AppState::SelectingRegion => "State: SelectingRegion",
-            AppState::SelectingWindow => "State: SelectingWindow",
-            AppState::Capturing => "State: Capturing",
-            AppState::Editing => "State: Editing",
-            AppState::Scrolling => "State: Scrolling",
-            AppState::ChoosingAction => "State: ChoosingAction",
+            AppState::Idle => "wlsnap — Idle",
+            AppState::SelectingRegion => "wlsnap — Selecting region…",
+            AppState::SelectingWindow => "wlsnap — Selecting window…",
+            AppState::Capturing => "wlsnap — Capturing…",
+            AppState::Editing => "wlsnap — Editing…",
+            AppState::Scrolling => "wlsnap — Scrolling…",
+            AppState::ChoosingAction => "wlsnap — Choosing action…",
         };
-        ui.heading(state_label);
+
+        ui.vertical_centered(|ui| {
+            ui.heading(state_label);
+            ui.label("v0.1.0 CLI-driven capture");
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn make_cli_with_stdout() -> Cli {
+        Cli {
+            mode: wlsnap::cli::CaptureMode {
+                full: true,
+                full_all: false,
+                area: false,
+                window: false,
+                output: false,
+                pin: None,
+                scroll_auto: false,
+                scroll_manual: false,
+            },
+            post: None,
+            stdout: true,
+            output: None,
+            exec: None,
+            clipboard: false,
+            silent: false,
+            cursor: false,
+            list_outputs: false,
+            debug_protocol: false,
+            config: None,
+        }
+    }
+
+    fn make_cli_with_exec(cmd: &str) -> Cli {
+        Cli {
+            mode: wlsnap::cli::CaptureMode {
+                full: true,
+                full_all: false,
+                area: false,
+                window: false,
+                output: false,
+                pin: None,
+                scroll_auto: false,
+                scroll_manual: false,
+            },
+            post: None,
+            stdout: false,
+            output: None,
+            exec: Some(cmd.into()),
+            clipboard: false,
+            silent: false,
+            cursor: false,
+            list_outputs: false,
+            debug_protocol: false,
+            config: None,
+        }
+    }
+
+    fn make_cli_with_clipboard() -> Cli {
+        Cli {
+            mode: wlsnap::cli::CaptureMode {
+                full: true,
+                full_all: false,
+                area: false,
+                window: false,
+                output: false,
+                pin: None,
+                scroll_auto: false,
+                scroll_manual: false,
+            },
+            post: None,
+            stdout: false,
+            output: None,
+            exec: None,
+            clipboard: true,
+            silent: false,
+            cursor: false,
+            list_outputs: false,
+            debug_protocol: false,
+            config: None,
+        }
+    }
+
+    fn make_cli_with_output(path: PathBuf) -> Cli {
+        Cli {
+            mode: wlsnap::cli::CaptureMode {
+                full: true,
+                full_all: false,
+                area: false,
+                window: false,
+                output: false,
+                pin: None,
+                scroll_auto: false,
+                scroll_manual: false,
+            },
+            post: None,
+            stdout: false,
+            output: Some(path),
+            exec: None,
+            clipboard: false,
+            silent: false,
+            cursor: false,
+            list_outputs: false,
+            debug_protocol: false,
+            config: None,
+        }
+    }
+
+    fn make_cli_with_silent() -> Cli {
+        Cli {
+            mode: wlsnap::cli::CaptureMode {
+                full: true,
+                full_all: false,
+                area: false,
+                window: false,
+                output: false,
+                pin: None,
+                scroll_auto: false,
+                scroll_manual: false,
+            },
+            post: None,
+            stdout: false,
+            output: None,
+            exec: None,
+            clipboard: false,
+            silent: true,
+            cursor: false,
+            list_outputs: false,
+            debug_protocol: false,
+            config: None,
+        }
+    }
+
+    fn make_cli_with_post(post: PostCaptureAction) -> Cli {
+        Cli {
+            mode: wlsnap::cli::CaptureMode {
+                full: true,
+                full_all: false,
+                area: false,
+                window: false,
+                output: false,
+                pin: None,
+                scroll_auto: false,
+                scroll_manual: false,
+            },
+            post: Some(post),
+            stdout: false,
+            output: None,
+            exec: None,
+            clipboard: false,
+            silent: false,
+            cursor: false,
+            list_outputs: false,
+            debug_protocol: false,
+            config: None,
+        }
+    }
+
+    fn make_app_with_cli(cli: Cli) -> WlsnapApp {
+        WlsnapApp::new_with_cli(Config::default(), cli)
+    }
+
+    fn make_app_with_config(cli: Cli, config: Config) -> WlsnapApp {
+        WlsnapApp::new_with_cli(config, cli)
+    }
 
     #[test]
     fn test_app_new() {
@@ -92,6 +419,17 @@ mod tests {
         assert!(app.pin_windows.is_empty());
         assert!(app.current_output.is_none());
         assert!(app.all_outputs.is_empty());
+        assert!(app.cli.is_none());
+        assert!(!app.capture_initiated);
+        assert!(!app.output_dispatched);
+    }
+
+    #[test]
+    fn test_app_new_with_cli() {
+        let cli = make_cli_with_stdout();
+        let app = WlsnapApp::new_with_cli(Config::default(), cli);
+        assert!(app.cli.is_some());
+        assert!(!app.capture_initiated);
     }
 
     #[test]
@@ -122,7 +460,178 @@ mod tests {
     fn test_backend_event_capture_finished() {
         let config = Config::default();
         let app = WlsnapApp::new(config);
-        app.backend_tx.send(BackendEvent::CaptureFinished).unwrap();
+        let captured = CapturedImage {
+            image: image::RgbaImage::new(1, 1),
+            source_output: wlsnap::platform::output_info::OutputInfo {
+                name: "test".into(),
+                description: String::new(),
+                logical_geometry: wlsnap::platform::output_info::LogicalRect {
+                    min: wlsnap::platform::output_info::LogicalPoint { x: 0.0, y: 0.0 },
+                    max: wlsnap::platform::output_info::LogicalPoint { x: 1.0, y: 1.0 },
+                },
+                physical_size: (1, 1),
+                scale_factor: 1.0,
+                transform: wlsnap::platform::output_info::OutputTransform::Normal,
+            },
+        };
+        app.backend_tx
+            .send(BackendEvent::CaptureFinished {
+                captured,
+                mode: "full".into(),
+            })
+            .unwrap();
         // Just verify the channel works
+    }
+
+    // ------------------------------------------------------------------
+    // determine_output_action tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_determine_output_action_stdout_wins() {
+        let cli = make_cli_with_stdout();
+        let app = make_app_with_cli(cli);
+        assert!(matches!(app.determine_output_action(), OutputAction::Pipe));
+    }
+
+    #[test]
+    fn test_determine_output_action_exec_wins_over_clipboard() {
+        let mut cli = make_cli_with_exec("echo {file}");
+        cli.clipboard = true;
+        let app = make_app_with_cli(cli);
+        match app.determine_output_action() {
+            OutputAction::Exec(cmd) => assert_eq!(cmd, "echo {file}"),
+            other => panic!("expected Exec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_determine_output_action_clipboard_wins_over_save() {
+        let mut cli = make_cli_with_clipboard();
+        cli.silent = true;
+        let app = make_app_with_cli(cli);
+        assert!(
+            matches!(app.determine_output_action(), OutputAction::Clipboard),
+            "clipboard should win over silent"
+        );
+    }
+
+    #[test]
+    fn test_determine_output_action_output_flag_maps_to_save() {
+        let cli = make_cli_with_output(PathBuf::from("/tmp/test.png"));
+        let app = make_app_with_cli(cli);
+        assert!(matches!(app.determine_output_action(), OutputAction::Save));
+    }
+
+    #[test]
+    fn test_determine_output_action_silent_maps_to_save() {
+        let cli = make_cli_with_silent();
+        let app = make_app_with_cli(cli);
+        assert!(matches!(app.determine_output_action(), OutputAction::Save));
+    }
+
+    #[test]
+    fn test_determine_output_action_post_override() {
+        let cli = make_cli_with_post(PostCaptureAction::Clipboard);
+        let app = make_app_with_cli(cli);
+        assert!(
+            matches!(app.determine_output_action(), OutputAction::Clipboard),
+            "--post clipboard should map to Clipboard"
+        );
+    }
+
+    #[test]
+    fn test_determine_output_action_post_edit_maps_to_save_in_v010() {
+        let cli = make_cli_with_post(PostCaptureAction::Edit);
+        let app = make_app_with_cli(cli);
+        assert!(
+            matches!(app.determine_output_action(), OutputAction::Save),
+            "Edit should map to Save in v0.1.0"
+        );
+    }
+
+    #[test]
+    fn test_determine_output_action_post_ask_maps_to_save_in_v010() {
+        let cli = make_cli_with_post(PostCaptureAction::Ask);
+        let app = make_app_with_cli(cli);
+        assert!(
+            matches!(app.determine_output_action(), OutputAction::Save),
+            "Ask should map to Save in v0.1.0"
+        );
+    }
+
+    #[test]
+    fn test_determine_output_action_config_default_save() {
+        let cli = make_cli_with_stdout();
+        let mut cli = cli;
+        cli.stdout = false;
+        let mut config = Config::default();
+        config.general.post_capture = "save".into();
+        let app = make_app_with_config(cli, config);
+        assert!(matches!(app.determine_output_action(), OutputAction::Save));
+    }
+
+    #[test]
+    fn test_determine_output_action_config_default_clipboard() {
+        let cli = make_cli_with_stdout();
+        let mut cli = cli;
+        cli.stdout = false;
+        let mut config = Config::default();
+        config.general.post_capture = "clipboard".into();
+        let app = make_app_with_config(cli, config);
+        assert!(matches!(
+            app.determine_output_action(),
+            OutputAction::Clipboard
+        ));
+    }
+
+    #[test]
+    fn test_determine_output_action_config_default_pipe() {
+        let cli = make_cli_with_stdout();
+        let mut cli = cli;
+        cli.stdout = false;
+        let mut config = Config::default();
+        config.general.post_capture = "pipe".into();
+        let app = make_app_with_config(cli, config);
+        assert!(matches!(app.determine_output_action(), OutputAction::Pipe));
+    }
+
+    #[test]
+    fn test_determine_output_action_config_default_edit_maps_to_save() {
+        let cli = make_cli_with_stdout();
+        let mut cli = cli;
+        cli.stdout = false;
+        let mut config = Config::default();
+        config.general.post_capture = "edit".into();
+        let app = make_app_with_config(cli, config);
+        assert!(
+            matches!(app.determine_output_action(), OutputAction::Save),
+            "config 'edit' should map to Save in v0.1.0"
+        );
+    }
+
+    #[test]
+    fn test_determine_output_action_config_default_unknown_maps_to_save() {
+        let cli = make_cli_with_stdout();
+        let mut cli = cli;
+        cli.stdout = false;
+        let mut config = Config::default();
+        config.general.post_capture = "foobar".into();
+        let app = make_app_with_config(cli, config);
+        assert!(
+            matches!(app.determine_output_action(), OutputAction::Save),
+            "unknown config value should default to Save"
+        );
+    }
+
+    #[test]
+    fn test_determine_output_action_explicit_flags_beat_post() {
+        let mut cli = make_cli_with_post(PostCaptureAction::Save);
+        cli.stdout = true;
+        let app = make_app_with_cli(cli);
+        assert!(
+            matches!(app.determine_output_action(), OutputAction::Pipe),
+            "--stdout should beat --post save"
+        );
     }
 }

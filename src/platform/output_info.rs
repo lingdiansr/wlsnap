@@ -75,7 +75,10 @@ impl From<wayland_client::protocol::wl_output::Transform> for OutputTransform {
             WlTransform::Flipped180 => OutputTransform::Flipped180,
             WlTransform::Flipped270 => OutputTransform::Flipped270,
             _ => {
-                warn!("Unknown wl_output transform {:?}, defaulting to Normal", value);
+                warn!(
+                    "Unknown wl_output transform {:?}, defaulting to Normal",
+                    value
+                );
                 OutputTransform::Normal
             }
         }
@@ -92,13 +95,31 @@ mod tests {
         let height = 1080_u32;
 
         assert_eq!(OutputTransform::Normal.apply(width, height), (1920, 1080));
-        assert_eq!(OutputTransform::Rotated90.apply(width, height), (1080, 1920));
-        assert_eq!(OutputTransform::Rotated180.apply(width, height), (1920, 1080));
-        assert_eq!(OutputTransform::Rotated270.apply(width, height), (1080, 1920));
+        assert_eq!(
+            OutputTransform::Rotated90.apply(width, height),
+            (1080, 1920)
+        );
+        assert_eq!(
+            OutputTransform::Rotated180.apply(width, height),
+            (1920, 1080)
+        );
+        assert_eq!(
+            OutputTransform::Rotated270.apply(width, height),
+            (1080, 1920)
+        );
         assert_eq!(OutputTransform::Flipped.apply(width, height), (1920, 1080));
-        assert_eq!(OutputTransform::Flipped90.apply(width, height), (1080, 1920));
-        assert_eq!(OutputTransform::Flipped180.apply(width, height), (1920, 1080));
-        assert_eq!(OutputTransform::Flipped270.apply(width, height), (1080, 1920));
+        assert_eq!(
+            OutputTransform::Flipped90.apply(width, height),
+            (1080, 1920)
+        );
+        assert_eq!(
+            OutputTransform::Flipped180.apply(width, height),
+            (1920, 1080)
+        );
+        assert_eq!(
+            OutputTransform::Flipped270.apply(width, height),
+            (1080, 1920)
+        );
     }
 
     #[test]
@@ -123,11 +144,17 @@ mod tests {
     fn logical_rect_equality() {
         let a = LogicalRect {
             min: LogicalPoint { x: 0.0, y: 0.0 },
-            max: LogicalPoint { x: 1920.0, y: 1080.0 },
+            max: LogicalPoint {
+                x: 1920.0,
+                y: 1080.0,
+            },
         };
         let b = LogicalRect {
             min: LogicalPoint { x: 0.0, y: 0.0 },
-            max: LogicalPoint { x: 1920.0, y: 1080.0 },
+            max: LogicalPoint {
+                x: 1920.0,
+                y: 1080.0,
+            },
         };
         assert_eq!(a, b);
     }
