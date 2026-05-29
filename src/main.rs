@@ -1,10 +1,7 @@
 mod app;
-mod config;
-mod constants;
-mod error;
 
 use app::WlsnapApp;
-use config::Config;
+use wlsnap::config::Config;
 
 fn main() -> eframe::Result {
     // 1. Initialize tracing
@@ -20,7 +17,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        constants::APP_NAME,
+        wlsnap::constants::APP_NAME,
         native_options,
         Box::new(|_cc| Ok(Box::new(WlsnapApp::new(config)))),
     )

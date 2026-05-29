@@ -541,7 +541,7 @@ Idle ──► SelectingRegion ──► Capturing ──► Editing ──► C
   │
   ├──► SelectingWindow ──► Capturing ──► ... (同上)
   │
-  ├──► Capturing (直接 --full / --full-all / --output) ──► ...
+  ├──► Capturing (直接 --full / --full-all / --screen) ──► ...
   │
   ├──► Scrolling ──► Editing / Save / Clipboard / Pipe ──► Idle
   │
@@ -761,8 +761,8 @@ pub struct CaptureMode {
     #[arg(long)]
     pub window: bool,        // 当前屏幕窗口截图
 
-    #[arg(long)]
-    pub output: bool,        // 当前屏幕（同 full，语义别名）
+    #[arg(id = "screen", long = "screen")]
+    pub output: bool,        // 当前屏幕（同 full，语义别名），CLI 标识为 --screen 以避免与 -o/--output PATH 冲突
 
     #[arg(long, value_name = "PATH")]
     pub pin: Option<Option<PathBuf>>,
@@ -800,7 +800,7 @@ CLI 显式参数 > 配置文件 > 默认值：
 | `--full-all` | 捕获所有输出并拼接为一张大图 |
 | `--area` | 在当前指针所在屏幕上进入区域选择 |
 | `--window` | 在当前指针所在屏幕上枚举窗口并选择 |
-| `--output` | 同 `--full` |
+| `--screen` | 同 `--full`（原 `--output`，为避免与 `-o/--output PATH` 冲突而改名） |
 
 **当前屏幕判定**：通过 `wl_pointer` 的 `wl_surface::enter` 事件或查询 pointer 所在 `wl_output` 确定。平台初始化时缓存所有 output 的几何信息，根据指针全局坐标匹配。
 

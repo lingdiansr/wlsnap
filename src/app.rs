@@ -1,4 +1,4 @@
-use crate::config::Config;
+use wlsnap::config::Config;
 use std::sync::Arc;
 
 /// 全局应用状态机
