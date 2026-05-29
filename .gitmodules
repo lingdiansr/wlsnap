@@ -1,0 +1,6 @@
+[submodule "refs/wayscrollshot"]
+	path = refs/wayscrollshot
+	url = https://github.com/jswysnemc/wayscrollshot.git
+[submodule "refs/mark-shot"]
+	path = refs/mark-shot
+	url = https://github.com/jswysnemc/mark-shot.git
