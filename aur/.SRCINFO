@@ -1,0 +1,18 @@
+pkgbase = wlsnap
+	pkgdesc = Wayland screenshot utility - CLI-driven capture with editing, Pin, and scrolling support
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/lingdiansr/wlsnap
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	makedepends = libxkbcommon
+	makedepends = pkgconf
+	makedepends = rust
+	depends = gcc-libs
+	depends = glibc
+	depends = libxkbcommon
+	source = wlsnap-0.1.0.tar.gz::https://github.com/lingdiansr/wlsnap/archive/v0.1.0.tar.gz
+	sha256sums = 01ddb7999c0ed322c82f8fc404acbea7d41526ba4b9fb931f8ffd25bfa2760bf
+
+pkgname = wlsnap
