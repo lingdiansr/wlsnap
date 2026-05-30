@@ -7,6 +7,7 @@ use wlsnap::output_manager::{OutputAction, dispatch};
 
 /// 全局应用状态机
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum AppState {
     Idle,
     SelectingRegion,
@@ -30,6 +31,7 @@ pub enum BackendEvent {
 }
 
 /// 全局应用结构
+#[allow(dead_code)]
 pub struct WlsnapApp {
     pub state: AppState,
     pub pin_windows: Vec<()>, // placeholder for PinWindow (not yet implemented)

@@ -31,8 +31,8 @@ pub fn validate_region(region: LogicalRect, output: &OutputInfo) -> Result<Logic
 /// Convert a region from logical coordinates to physical pixel coordinates
 /// using the output's scale_factor.
 pub fn region_to_physical(region: &LogicalRect, scale_factor: f64) -> (u32, u32, u32, u32) {
-    let x = ((region.min.x * scale_factor).round() as u32).max(0);
-    let y = ((region.min.y * scale_factor).round() as u32).max(0);
+    let x = (region.min.x * scale_factor).round() as u32;
+    let y = (region.min.y * scale_factor).round() as u32;
     let width = ((region.max.x - region.min.x) * scale_factor).round() as u32;
     let height = ((region.max.y - region.min.y) * scale_factor).round() as u32;
     (x, y, width, height)

@@ -11,7 +11,7 @@ pub fn exec_with_image(cmd_template: &str, image: &RgbaImage) -> Result<()> {
     let tmp = tempfile::Builder::new()
         .suffix(".png")
         .tempfile()
-        .map_err(|e| WlsnapError::Io(e))?;
+        .map_err(WlsnapError::Io)?;
 
     let path = tmp.path().to_path_buf();
 

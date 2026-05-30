@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// 顶级配置结构
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
     pub general: GeneralConfig,
@@ -20,18 +20,7 @@ pub struct Config {
     pub advanced: AdvancedConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            editor: EditorConfig::default(),
-            pin: PinConfig::default(),
-            scrolling: ScrollingConfig::default(),
-            shortcuts: ShortcutsConfig::default(),
-            advanced: AdvancedConfig::default(),
-        }
-    }
-}
+
 
 impl Config {
     /// 加载配置文件。若文件不存在，则创建默认配置并写入。
@@ -225,8 +214,9 @@ impl Default for AdvancedConfig {
 }
 
 /// 图像保存格式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum ImageFormat {
+    #[default]
     Png,
     Jpeg,
     WebP,
@@ -242,23 +232,12 @@ impl ImageFormat {
     }
 }
 
-impl Default for ImageFormat {
-    fn default() -> Self {
-        ImageFormat::Png
-    }
-}
-
 /// 长截图拼接算法
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum StitchAlgorithm {
+    #[default]
     ColumnSampling,
     Orb,
-}
-
-impl Default for StitchAlgorithm {
-    fn default() -> Self {
-        StitchAlgorithm::ColumnSampling
-    }
 }
 
 /// 展开路径和文件名模板中的占位符

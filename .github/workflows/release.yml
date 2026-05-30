@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Build release binary
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev wayland-scanner libxkbcommon-dev pkg-config
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Strip binary
+        run: strip target/release/wlsnap
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wlsnap-x86_64-linux
+          path: target/release/wlsnap
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 2. Run full test suite before release
+  # ---------------------------------------------------------------------------
+  test:
+    name: Pre-release Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev wayland-scanner libxkbcommon-dev pkg-config
+
+      - name: Run tests
+        run: cargo test --all-targets --all-features
+        env:
+          WAYLAND_DISPLAY: ""
+
+  # ---------------------------------------------------------------------------
+  # 3. Create GitHub Release with changelog and binary
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wlsnap-x86_64-linux
+          path: ./artifacts
+
+      - name: Make binary executable
+        run: chmod +x ./artifacts/wlsnap
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Extract changelog section for this version from the tag
+          VERSION="${{ github.ref_name }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # Generate release notes from git log since last tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "## Changes since $PREVIOUS_TAG" > RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            git log --pretty=format:'- %s' "$PREVIOUS_TAG"..HEAD >> RELEASE_NOTES.md
+          else
+            echo "## Initial release" > RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            git log --pretty=format:'- %s' >> RELEASE_NOTES.md
+          fi
+          echo "" >> RELEASE_NOTES.md
+          echo "## Checksums" >> RELEASE_NOTES.md
+          echo '```' >> RELEASE_NOTES.md
+          sha256sum ./artifacts/wlsnap >> RELEASE_NOTES.md
+          echo '```' >> RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: ./artifacts/wlsnap
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

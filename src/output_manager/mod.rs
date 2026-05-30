@@ -55,10 +55,12 @@ mod tests {
     #[test]
     fn test_dispatch_save_produces_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut config = GeneralConfig::default();
-        config.save_dir = tmp.path().to_str().unwrap().to_string();
-        config.filename_template = "test_save".to_string();
-        config.format = ImageFormat::Png;
+        let config = GeneralConfig {
+            save_dir: tmp.path().to_str().unwrap().to_string(),
+            filename_template: "test_save".to_string(),
+            format: ImageFormat::Png,
+            ..Default::default()
+        };
 
         let path = dispatch(&dummy_image(), OutputAction::Save, &config, "test_mode").unwrap();
         assert!(path.exists());

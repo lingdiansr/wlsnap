@@ -1,0 +1,117 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/checks/cfg.html
+
+[graph]
+# Only check dependencies for our target
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+]
+
+# ---------------------------------------------------------------------------
+# Advisory checks — CVE scanning via RustSec advisory-db
+# ---------------------------------------------------------------------------
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# Severity levels
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "warn"
+notice = "warn"
+
+# Ignore specific advisories (use sparingly, document reason)
+ignore = []
+
+# ---------------------------------------------------------------------------
+# License checks
+# ---------------------------------------------------------------------------
+[licenses]
+# Confidence threshold for license detection
+confidence-threshold = 0.8
+
+# Allow common open-source licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "OpenSSL",
+    "CC0-1.0",
+    "Unlicense",
+]
+
+# Explicitly deny problematic licenses
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-3.0",
+    "LGPL-2.1",
+    "LGPL-3.0",
+]
+
+# Allow exceptions for specific crates with unclear licensing
+# [[licenses.clarify]]
+# name = "some-crate"
+# version = "*"
+# expression = "MIT"
+# license-files = [{ path = "LICENSE", hash = 0x... }]
+
+# ---------------------------------------------------------------------------
+# Dependency bans — duplicate versions, specific crates
+# ---------------------------------------------------------------------------
+[bans]
+# Warn on multiple versions of the same crate
+multiple-versions = "warn"
+
+# Allow wildcards in dev-dependencies and early development
+wildcards = "allow"
+
+# Highlight specific duplicate crates we want to clean up
+# These are known duplicates in the current dependency tree
+highlight = [
+    "calloop",
+    "smithay-client-toolkit",
+    "wayland-client",
+    "wayland-protocols",
+    "winit",
+    "raw-window-handle",
+    "nix",
+]
+
+# Skip checking certain crates for duplicates (transitive deps we can't control)
+skip = [
+    # eframe/egui ecosystem often has transitive duplicate windowing crates
+    { name = "raw-window-handle", version = "*" },
+    # wayland-protocols may be pulled in at different versions
+    { name = "wayland-protocols", version = "*" },
+]
+
+# Skip checking specific crate trees
+skip-tree = [
+    # winit and sctk have their own wayland-client versions
+    { name = "winit", version = "*" },
+    { name = "smithay-client-toolkit", version = "*" },
+]
+
+# ---------------------------------------------------------------------------
+# Source checks — prevent unknown registries/git repos
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+
+# Allow crates.io (default) and specific git repos if needed
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+# ---------------------------------------------------------------------------
+# Output settings
+# ---------------------------------------------------------------------------
+[output]
+# Print summary at the end
+feature-depth = 1
