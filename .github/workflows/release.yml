@@ -138,10 +138,10 @@ jobs:
           cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.sha256" "release/wlsnap-${VERSION}-x86_64-linux.sha256"
           cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.md5" "release/wlsnap-${VERSION}-x86_64-linux.md5"
 
-          # Source tarball (for AUR and other packagers)
-          git archive --format=tar.gz -o "release/wlsnap-${VERSION}.tar.gz" "$VERSION"
+          # Package binary into a tarball for easy distribution
+          tar czf "release/wlsnap-${VERSION}-x86_64-linux.tar.gz" -C "artifacts/wlsnap-x86_64-linux" wlsnap
           cd release
-          sha256sum "wlsnap-${VERSION}.tar.gz" > "wlsnap-${VERSION}.tar.gz.sha256"
+          sha256sum "wlsnap-${VERSION}-x86_64-linux.tar.gz" > "wlsnap-${VERSION}-x86_64-linux.tar.gz.sha256"
 
       - name: Generate changelog
         id: changelog
@@ -164,19 +164,19 @@ jobs:
             echo ""
             echo "| File | Description |"
             echo "|------|-------------|"
-            echo "| \`wlsnap-*.tar.gz\` | Source tarball (for AUR/build from source) |"
-            echo "| \`wlsnap-*-x86_64-linux\` | Linux x86_64 binary |"
+            echo "| \`wlsnap-*-x86_64-linux\` | Linux x86_64 binary (standalone) |"
+            echo "| \`wlsnap-*-x86_64-linux.tar.gz\` | Binary packaged in tarball |"
             echo "| \`*.sha256\` | SHA256 checksum |"
             echo "| \`*.md5\` | MD5 checksum |"
             echo ""
             echo "## AUR Packaging"
             echo ""
-            echo "The \`PKGBUILD\` in the repository uses the source tarball above."
+            echo "The AUR package \`wlsnap-bin\` downloads the pre-built binary."
             echo "To update AUR on new release, bump \`pkgver\` and update \`sha256sums\`:"
             echo ""
             echo '```bash'
             echo "pkgver=$VERSION"
-            echo 'sha256sums=$(curl -sL "https://github.com/lingdiansr/wlsnap/releases/download/${pkgver}/wlsnap-${pkgver}.tar.gz" | sha256sum | cut -d" " -f1)'
+            echo 'sha256sums=$(curl -sL "https://github.com/lingdiansr/wlsnap/releases/download/${pkgver}/wlsnap-${pkgver}-x86_64-linux" | sha256sum | cut -d" " -f1)'
             echo '```'
             echo ""
             echo "## Checksums"
