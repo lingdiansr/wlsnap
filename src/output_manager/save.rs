@@ -6,23 +6,48 @@ use std::path::PathBuf;
 
 /// Save an image to disk according to `config`.
 ///
-/// Placeholders in `save_dir` and `filename_template` are expanded,
+/// If `custom_path` is provided, the image is saved directly to that path
+/// (ignoring `save_dir` and `filename_template`).
+///
+/// Otherwise, placeholders in `save_dir` and `filename_template` are expanded,
 /// directories are created with `0o700`, and the file is written with `0o600`.
-pub fn save_image(image: &image::RgbaImage, config: &GeneralConfig, mode: &str) -> Result<PathBuf> {
-    let dir = expand_placeholders(&config.save_dir, Some(mode))?;
-    let filename = expand_placeholders(&config.filename_template, Some(mode))?;
-    let ext = config.format.extension();
-
-    let path = PathBuf::from(&dir).join(format!("{}.{}", filename, ext));
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-        #[cfg(unix)]
+pub fn save_image(
+    image: &image::RgbaImage,
+    config: &GeneralConfig,
+    mode: &str,
+    custom_path: Option<&std::path::Path>,
+) -> Result<PathBuf> {
+    let path = if let Some(custom) = custom_path {
+        // Use the exact path provided by CLI -o
+        if let Some(parent) = custom.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+            fs::create_dir_all(parent)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+            }
         }
-    }
+        custom.to_path_buf()
+    } else {
+        let dir = expand_placeholders(&config.save_dir, Some(mode))?;
+        let filename = expand_placeholders(&config.filename_template, Some(mode))?;
+        let ext = config.format.extension();
+
+        let path = PathBuf::from(&dir).join(format!("{}.{}", filename, ext));
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+            }
+        }
+        path
+    };
 
     let file = fs::File::create(&path)?;
     let mut writer = BufWriter::new(file);
@@ -91,7 +116,7 @@ mod tests {
     fn test_save_image_png() {
         let tmp = tempfile::tempdir().unwrap();
         let config = make_config(&tmp, ImageFormat::Png, 90);
-        let path = save_image(&dummy_image(), &config, "region").unwrap();
+        let path = save_image(&dummy_image(), &config, "region", None).unwrap();
         assert!(path.exists());
         assert_eq!(path.extension().unwrap(), "png");
         let meta = fs::metadata(&path).unwrap();
@@ -107,7 +132,7 @@ mod tests {
     fn test_save_image_jpeg() {
         let tmp = tempfile::tempdir().unwrap();
         let config = make_config(&tmp, ImageFormat::Jpeg, 90);
-        let path = save_image(&dummy_image(), &config, "window").unwrap();
+        let path = save_image(&dummy_image(), &config, "window", None).unwrap();
         assert!(path.exists());
         assert_eq!(path.extension().unwrap(), "jpeg");
     }
@@ -116,9 +141,20 @@ mod tests {
     fn test_save_image_webp() {
         let tmp = tempfile::tempdir().unwrap();
         let config = make_config(&tmp, ImageFormat::WebP, 90);
-        let path = save_image(&dummy_image(), &config, "full").unwrap();
+        let path = save_image(&dummy_image(), &config, "full", None).unwrap();
         assert!(path.exists());
         assert_eq!(path.extension().unwrap(), "webp");
+    }
+
+    #[test]
+    fn test_save_image_custom_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = make_config(&tmp, ImageFormat::Png, 90);
+        let custom = tmp.path().join("my/custom/path.png");
+        let path = save_image(&dummy_image(), &config, "ignored", Some(&custom)).unwrap();
+        assert!(path.exists());
+        assert_eq!(path, custom);
+        assert_eq!(path.extension().unwrap(), "png");
     }
 
     #[test]
@@ -129,8 +165,8 @@ mod tests {
         let config_high = make_config(&tmp1, ImageFormat::Jpeg, 95);
         let config_low = make_config(&tmp2, ImageFormat::Jpeg, 50);
 
-        let path_high = save_image(&dummy_image(), &config_high, "test").unwrap();
-        let path_low = save_image(&dummy_image(), &config_low, "test").unwrap();
+        let path_high = save_image(&dummy_image(), &config_high, "test", None).unwrap();
+        let path_low = save_image(&dummy_image(), &config_low, "test", None).unwrap();
 
         let size_high = fs::metadata(&path_high).unwrap().len();
         let size_low = fs::metadata(&path_low).unwrap().len();
@@ -150,7 +186,7 @@ mod tests {
         let mut config = make_config(&tmp, ImageFormat::Png, 90);
         config.filename_template = "img_{mode}".into();
 
-        let path = save_image(&dummy_image(), &config, "my_mode").unwrap();
+        let path = save_image(&dummy_image(), &config, "my_mode", None).unwrap();
         let name = path.file_stem().unwrap().to_str().unwrap();
         assert!(
             name.contains("my_mode"),
@@ -166,7 +202,7 @@ mod tests {
         config.save_dir = tmp.path().join("sub/deep").to_str().unwrap().into();
         config.filename_template = "deep".into();
 
-        let path = save_image(&dummy_image(), &config, "test").unwrap();
+        let path = save_image(&dummy_image(), &config, "test", None).unwrap();
         assert!(path.exists());
 
         #[cfg(unix)]

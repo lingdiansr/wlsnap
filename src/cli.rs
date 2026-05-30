@@ -9,33 +9,43 @@ pub struct Cli {
     #[command(flatten)]
     pub mode: CaptureMode,
 
+    /// Action to perform after capture
     #[arg(short, long, value_name = "ACTION")]
     pub post: Option<PostCaptureAction>,
 
+    /// Output the image to stdout as PNG
     #[arg(long)]
     pub stdout: bool,
 
+    /// Save the image to the specified path
     #[arg(short, long, value_name = "PATH")]
     pub output: Option<PathBuf>,
 
+    /// Execute a command with the captured image file path
     #[arg(long, value_name = "CMD")]
     pub exec: Option<String>,
 
+    /// Copy the image to the clipboard
     #[arg(long)]
     pub clipboard: bool,
 
+    /// Save without printing the file path to stdout
     #[arg(long)]
     pub silent: bool,
 
+    /// Include the cursor in the screenshot
     #[arg(long)]
     pub cursor: bool,
 
+    /// List all detected outputs and exit
     #[arg(long)]
     pub list_outputs: bool,
 
+    /// Print available Wayland protocols and exit
     #[arg(long)]
     pub debug_protocol: bool,
 
+    /// Path to a custom configuration file
     #[arg(short, long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 }
@@ -43,43 +53,47 @@ pub struct Cli {
 #[derive(Debug, Args, Clone)]
 #[group(required = false, multiple = false)]
 pub struct CaptureMode {
+    /// Capture the entire current screen
     #[arg(long)]
-    pub full: bool,
+    pub screen: bool,
 
+    /// Capture all screens and stitch them into one image
     #[arg(long)]
-    pub full_all: bool,
+    pub screen_all: bool,
 
+    /// Capture the current screen (same as --full in v0.1.0)
     #[arg(long)]
     pub area: bool,
 
+    /// Capture a specific window (interactive, requires GUI)
     #[arg(long)]
     pub window: bool,
 
-    #[arg(id = "screen", long = "screen")]
-    pub output: bool,
 
+
+    /// Pin the captured image as a floating window (requires GUI)
     #[arg(long, value_name = "PATH")]
     pub pin: Option<Option<PathBuf>>,
 
+    /// Automatically capture a scrolling area (requires GUI)
     #[arg(long)]
     pub scroll_auto: bool,
 
+    /// Manually capture a scrolling area (requires GUI)
     #[arg(long)]
     pub scroll_manual: bool,
 }
 
 impl CaptureMode {
     pub fn selected_mode_name(&self) -> &'static str {
-        if self.full {
-            "full"
-        } else if self.full_all {
-            "full_all"
+        if self.screen {
+            "screen"
+        } else if self.screen_all {
+            "screen_all"
         } else if self.area {
             "area"
         } else if self.window {
             "window"
-        } else if self.output {
-            "screen"
         } else if self.pin.is_some() {
             "pin"
         } else if self.scroll_auto {
@@ -87,17 +101,22 @@ impl CaptureMode {
         } else if self.scroll_manual {
             "scroll_manual"
         } else {
-            "full"
+            "screen"
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum PostCaptureAction {
+    /// Open the image in the built-in editor (requires GUI)
     Edit,
+    /// Save the image to disk
     Save,
+    /// Copy the image to the clipboard
     Clipboard,
+    /// Output the image to stdout as PNG
     Pipe,
+    /// Ask what to do with the image (requires GUI)
     Ask,
 }
 
@@ -106,11 +125,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_full_flag() {
-        let cli = Cli::try_parse_from(["wlsnap", "--full"]).unwrap();
-        assert!(cli.mode.full);
+    fn parse_screen_flag() {
+        let cli = Cli::try_parse_from(["wlsnap", "--screen"]).unwrap();
+        assert!(cli.mode.screen);
         assert!(!cli.mode.area);
-        assert_eq!(cli.mode.selected_mode_name(), "full");
+        assert_eq!(cli.mode.selected_mode_name(), "screen");
     }
 
     #[test]
@@ -129,7 +148,7 @@ mod tests {
 
     #[test]
     fn conflicting_modes_rejected() {
-        let result = Cli::try_parse_from(["wlsnap", "--full", "--area"]);
+        let result = Cli::try_parse_from(["wlsnap", "--screen", "--area"]);
         assert!(result.is_err());
     }
 

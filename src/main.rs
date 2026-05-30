@@ -3,6 +3,7 @@ mod app;
 use app::WlsnapApp;
 use clap::Parser;
 use wlsnap::cli::Cli;
+use wlsnap::cli_action;
 use wlsnap::config::Config;
 
 fn main() -> eframe::Result {
@@ -48,7 +49,21 @@ fn main() -> eframe::Result {
     // 4. Load config
     let config = Config::load().unwrap_or_default();
 
-    // 5. Run eframe with CLI-driven app
+    // 5. If this is a pure CLI mode (no GUI needed), run headless and exit
+    if !cli_action::needs_gui(&cli) {
+        match cli_action::run_cli_capture(&cli, &config) {
+            Ok(path) => {
+                tracing::info!("Output dispatched: {:?}", path);
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::error!("Output dispatch failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // 6. GUI mode: run eframe with CLI-driven app
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([400.0, 100.0])

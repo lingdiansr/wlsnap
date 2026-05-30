@@ -109,8 +109,11 @@ impl WlsnapApp {
         if cli.clipboard {
             return OutputAction::Clipboard;
         }
-        if cli.output.is_some() || cli.silent {
-            return OutputAction::Save;
+        if let Some(ref path) = cli.output {
+            return OutputAction::Save(Some(path.clone()));
+        }
+        if cli.silent {
+            return OutputAction::Save(None);
         }
         if let Some(post) = cli.post {
             return Self::post_action_to_output_action(post);
@@ -125,22 +128,22 @@ impl WlsnapApp {
     /// GUI editor yet.
     fn post_action_to_output_action(action: PostCaptureAction) -> OutputAction {
         match action {
-            PostCaptureAction::Edit => OutputAction::Save,
-            PostCaptureAction::Save => OutputAction::Save,
+            PostCaptureAction::Edit => OutputAction::Save(None),
+            PostCaptureAction::Save => OutputAction::Save(None),
             PostCaptureAction::Clipboard => OutputAction::Clipboard,
             PostCaptureAction::Pipe => OutputAction::Pipe,
-            PostCaptureAction::Ask => OutputAction::Save,
+            PostCaptureAction::Ask => OutputAction::Save(None),
         }
     }
 
     /// Parse the `general.post_capture` config string into an `OutputAction`.
     fn parse_post_capture_config(value: &str) -> OutputAction {
         match value.to_lowercase().as_str() {
-            "save" => OutputAction::Save,
+            "save" => OutputAction::Save(None),
             "clipboard" => OutputAction::Clipboard,
             "pipe" => OutputAction::Pipe,
-            "edit" | "ask" => OutputAction::Save,
-            _ => OutputAction::Save,
+            "edit" | "ask" => OutputAction::Save(None),
+            _ => OutputAction::Save(None),
         }
     }
 
@@ -155,7 +158,7 @@ impl WlsnapApp {
         let mode_name = cli.mode.selected_mode_name().to_string();
 
         self._runtime.spawn(async move {
-            let result = if cli.mode.full_all {
+            let result = if cli.mode.screen_all {
                 wlsnap::capture::output::capture_all_screens(overlay_cursor).await
             } else {
                 // --full, --screen, --area, --window, or default (no mode) all
@@ -208,7 +211,7 @@ impl eframe::App for WlsnapApp {
                     self.state = AppState::Idle;
                     self.output_dispatched = true;
 
-                    let action = self.pending_action.take().unwrap_or(OutputAction::Save);
+                    let action = self.pending_action.take().unwrap_or(OutputAction::Save(None));
                     let general_config = &self.config.general;
 
                     match dispatch(&captured.image, action, general_config, &mode) {
@@ -265,11 +268,10 @@ mod tests {
     fn make_cli_with_stdout() -> Cli {
         Cli {
             mode: wlsnap::cli::CaptureMode {
-                full: true,
-                full_all: false,
+                screen: true,
+                screen_all: false,
                 area: false,
                 window: false,
-                output: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
@@ -290,11 +292,10 @@ mod tests {
     fn make_cli_with_exec(cmd: &str) -> Cli {
         Cli {
             mode: wlsnap::cli::CaptureMode {
-                full: true,
-                full_all: false,
+                screen: true,
+                screen_all: false,
                 area: false,
                 window: false,
-                output: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
@@ -315,11 +316,10 @@ mod tests {
     fn make_cli_with_clipboard() -> Cli {
         Cli {
             mode: wlsnap::cli::CaptureMode {
-                full: true,
-                full_all: false,
+                screen: true,
+                screen_all: false,
                 area: false,
                 window: false,
-                output: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
@@ -340,11 +340,10 @@ mod tests {
     fn make_cli_with_output(path: PathBuf) -> Cli {
         Cli {
             mode: wlsnap::cli::CaptureMode {
-                full: true,
-                full_all: false,
+                screen: true,
+                screen_all: false,
                 area: false,
                 window: false,
-                output: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
@@ -365,11 +364,10 @@ mod tests {
     fn make_cli_with_silent() -> Cli {
         Cli {
             mode: wlsnap::cli::CaptureMode {
-                full: true,
-                full_all: false,
+                screen: true,
+                screen_all: false,
                 area: false,
                 window: false,
-                output: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
@@ -390,11 +388,10 @@ mod tests {
     fn make_cli_with_post(post: PostCaptureAction) -> Cli {
         Cli {
             mode: wlsnap::cli::CaptureMode {
-                full: true,
-                full_all: false,
+                screen: true,
+                screen_all: false,
                 area: false,
                 window: false,
-                output: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
@@ -486,7 +483,7 @@ mod tests {
         app.backend_tx
             .send(BackendEvent::CaptureFinished {
                 captured,
-                mode: "full".into(),
+                mode: "screen".into(),
             })
             .unwrap();
         // Just verify the channel works
@@ -529,14 +526,14 @@ mod tests {
     fn test_determine_output_action_output_flag_maps_to_save() {
         let cli = make_cli_with_output(PathBuf::from("/tmp/test.png"));
         let app = make_app_with_cli(cli);
-        assert!(matches!(app.determine_output_action(), OutputAction::Save));
+        assert!(matches!(app.determine_output_action(), OutputAction::Save(_)));
     }
 
     #[test]
     fn test_determine_output_action_silent_maps_to_save() {
         let cli = make_cli_with_silent();
         let app = make_app_with_cli(cli);
-        assert!(matches!(app.determine_output_action(), OutputAction::Save));
+        assert!(matches!(app.determine_output_action(), OutputAction::Save(_)));
     }
 
     #[test]
@@ -554,7 +551,7 @@ mod tests {
         let cli = make_cli_with_post(PostCaptureAction::Edit);
         let app = make_app_with_cli(cli);
         assert!(
-            matches!(app.determine_output_action(), OutputAction::Save),
+            matches!(app.determine_output_action(), OutputAction::Save(_)),
             "Edit should map to Save in v0.1.0"
         );
     }
@@ -564,7 +561,7 @@ mod tests {
         let cli = make_cli_with_post(PostCaptureAction::Ask);
         let app = make_app_with_cli(cli);
         assert!(
-            matches!(app.determine_output_action(), OutputAction::Save),
+            matches!(app.determine_output_action(), OutputAction::Save(_)),
             "Ask should map to Save in v0.1.0"
         );
     }
@@ -577,7 +574,7 @@ mod tests {
         let mut config = Config::default();
         config.general.post_capture = "save".into();
         let app = make_app_with_config(cli, config);
-        assert!(matches!(app.determine_output_action(), OutputAction::Save));
+        assert!(matches!(app.determine_output_action(), OutputAction::Save(_)));
     }
 
     #[test]
@@ -614,7 +611,7 @@ mod tests {
         config.general.post_capture = "edit".into();
         let app = make_app_with_config(cli, config);
         assert!(
-            matches!(app.determine_output_action(), OutputAction::Save),
+            matches!(app.determine_output_action(), OutputAction::Save(_)),
             "config 'edit' should map to Save in v0.1.0"
         );
     }
@@ -628,7 +625,7 @@ mod tests {
         config.general.post_capture = "foobar".into();
         let app = make_app_with_config(cli, config);
         assert!(
-            matches!(app.determine_output_action(), OutputAction::Save),
+            matches!(app.determine_output_action(), OutputAction::Save(_)),
             "unknown config value should default to Save"
         );
     }

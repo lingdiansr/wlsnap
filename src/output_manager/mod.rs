@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum OutputAction {
-    Save,
+    /// Save to config default path, or custom path if Some.
+    Save(Option<PathBuf>),
     Clipboard,
     Pipe,
     Exec(String),
@@ -26,7 +27,9 @@ pub fn dispatch(
     mode: &str,
 ) -> Result<PathBuf> {
     match action {
-        OutputAction::Save => save::save_image(image, config, mode),
+        OutputAction::Save(custom_path) => {
+            save::save_image(image, config, mode, custom_path.as_deref())
+        }
         OutputAction::Clipboard => {
             clipboard::copy_to_clipboard(image)?;
             Ok(PathBuf::new())
@@ -62,7 +65,7 @@ mod tests {
             ..Default::default()
         };
 
-        let path = dispatch(&dummy_image(), OutputAction::Save, &config, "test_mode").unwrap();
+        let path = dispatch(&dummy_image(), OutputAction::Save(None), &config, "test_mode").unwrap();
         assert!(path.exists());
         assert_eq!(path.extension().unwrap(), "png");
     }

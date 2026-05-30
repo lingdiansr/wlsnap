@@ -173,14 +173,25 @@ mod tests {
     /// `ProtocolProbe` must be constructible even when no Wayland display is present.
     #[test]
     fn probe_constructible_without_wayland() {
-        let old = std::env::var_os("WAYLAND_DISPLAY");
+        let old_display = std::env::var_os("WAYLAND_DISPLAY");
+        let old_socket = std::env::var_os("WAYLAND_SOCKET");
         unsafe {
-            std::env::remove_var("WAYLAND_DISPLAY");
+            std::env::set_var("WAYLAND_DISPLAY", "__nonexistent_display__");
+            std::env::remove_var("WAYLAND_SOCKET");
         }
         let probe = ProtocolProbe::new();
-        if let Some(v) = old {
+        if let Some(v) = old_display {
             unsafe {
                 std::env::set_var("WAYLAND_DISPLAY", v);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var("WAYLAND_DISPLAY");
+            }
+        }
+        if let Some(v) = old_socket {
+            unsafe {
+                std::env::set_var("WAYLAND_SOCKET", v);
             }
         }
         assert!(!probe.has_ext_image_copy_capture());
