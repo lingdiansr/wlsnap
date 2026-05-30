@@ -1,0 +1,51 @@
+# Maintainer: lingdiansr <lingdiansr@example.com>
+pkgname=wlsnap
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Wayland screenshot utility - CLI-driven capture with editing, Pin, and scrolling support"
+arch=('x86_64')
+url="https://github.com/lingdiansr/wlsnap"
+license=('MIT')
+depends=(
+    'libwayland'
+    'libxkbcommon'
+)
+makedepends=(
+    'rust'
+    'cargo'
+    'wayland-protocols'
+    'libwayland'
+    'libxkbcommon'
+    'pkgconf'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    cargo build --release --locked
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    cargo test --release --locked
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+
+    # Binary
+    install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+
+    # License
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # Desktop entry (for future GUI integration)
+    install -Dm644 "config/$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop" 2>/dev/null || true
+
+    # Config example
+    install -Dm644 "config/config.example.toml" "$pkgdir/usr/share/doc/$pkgname/config.example.toml"
+
+    # Documentation
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md" 2>/dev/null || true
+}
