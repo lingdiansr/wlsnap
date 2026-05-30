@@ -50,6 +50,9 @@ pub struct WlsnapApp {
     /// Whether output has been dispatched (to know when to exit)
     output_dispatched: bool,
 
+    /// Pre-determined output action (stored before cli is taken for capture)
+    pending_action: Option<OutputAction>,
+
     // Keep runtime alive for the duration of the app
     _runtime: tokio::runtime::Runtime,
 }
@@ -70,6 +73,7 @@ impl WlsnapApp {
             cli: None,
             capture_initiated: false,
             output_dispatched: false,
+            pending_action: None,
             _runtime: runtime,
         }
     }
@@ -185,6 +189,9 @@ impl eframe::App for WlsnapApp {
             self.capture_initiated = true;
             self.state = AppState::Capturing;
 
+            // Determine output action BEFORE taking cli, since we need cli data later
+            self.pending_action = Some(self.determine_output_action());
+
             let tx = self.backend_tx.clone();
             let cli = self.cli.take().unwrap();
             let config = self.config.clone();
@@ -201,7 +208,7 @@ impl eframe::App for WlsnapApp {
                     self.state = AppState::Idle;
                     self.output_dispatched = true;
 
-                    let action = self.determine_output_action();
+                    let action = self.pending_action.take().unwrap_or(OutputAction::Save);
                     let general_config = &self.config.general;
 
                     match dispatch(&captured.image, action, general_config, &mode) {
