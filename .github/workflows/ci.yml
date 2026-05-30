@@ -147,7 +147,7 @@ jobs:
         run: cargo deny check
 
   # ---------------------------------------------------------------------------
-  # 7. Code coverage — tarpaulin + Codecov upload
+  # 7. Code coverage — tarpaulin with threshold check + artifact upload
   # ---------------------------------------------------------------------------
   coverage:
     name: Code Coverage
@@ -170,19 +170,31 @@ jobs:
       - name: Install cargo-tarpaulin
         uses: taiki-e/install-action@cargo-tarpaulin
 
-      - name: Generate coverage
-        run: cargo tarpaulin --all-targets --all-features --out xml --timeout 300
+      - name: Generate coverage report
+        run: cargo tarpaulin --all-targets --all-features --out html --out stdout --timeout 300
         env:
           WAYLAND_DISPLAY: ""
 
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./cobertura.xml
-          fail_ci_if_error: true
-          verbose: true
+      - name: Check coverage threshold
+        run: |
+          # Extract coverage percentage from tarpaulin stdout
+          COVERAGE=$(cargo tarpaulin --all-targets --all-features --out stdout --timeout 300 2>&1 | grep -oP '\d+\.\d+% coverage' | head -1 | grep -oP '\d+\.\d+' || echo "0")
+          echo "Coverage: $COVERAGE%"
+          THRESHOLD=50.0
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "Coverage $COVERAGE% is below threshold $THRESHOLD%"
+            exit 1
+          fi
+          echo "Coverage threshold passed"
         env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          WAYLAND_DISPLAY: ""
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: tarpaulin-report.html
+          if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
   # 8. Documentation — build rustdoc and deploy to GitHub Pages
