@@ -19,19 +19,32 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. Build release binary
+  # 1. Build release binaries for all targets
   # ---------------------------------------------------------------------------
   build:
-    name: Build Release
+    name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact_name: wlsnap-x86_64-linux
+            rust_target: x86_64-unknown-linux-gnu
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Install system dependencies
         run: |
@@ -39,16 +52,32 @@ jobs:
           sudo apt-get install -y libwayland-dev libwayland-bin libxkbcommon-dev pkg-config
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked --target ${{ matrix.rust_target }}
 
       - name: Strip binary
-        run: strip target/release/wlsnap
+        run: |
+          strip target/${{ matrix.rust_target }}/release/wlsnap
 
-      - name: Upload artifact
+      - name: Compute checksums
+        run: |
+          cd target/${{ matrix.rust_target }}/release
+          sha256sum wlsnap > wlsnap.sha256
+          md5sum wlsnap > wlsnap.md5
+
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wlsnap-x86_64-linux
-          path: target/release/wlsnap
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.rust_target }}/release/wlsnap
+          if-no-files-found: error
+
+      - name: Upload checksum artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-checksums
+          path: |
+            target/${{ matrix.rust_target }}/release/wlsnap.sha256
+            target/${{ matrix.rust_target }}/release/wlsnap.md5
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
@@ -59,6 +88,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -77,7 +108,7 @@ jobs:
           WAYLAND_DISPLAY: ""
 
   # ---------------------------------------------------------------------------
-  # 3. Create GitHub Release with changelog and binary
+  # 3. Create GitHub Release with all artifacts
   # ---------------------------------------------------------------------------
   release:
     name: Create Release
@@ -87,44 +118,74 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref_name }}
 
-      - name: Download build artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: wlsnap-x86_64-linux
           path: ./artifacts
+          pattern: wlsnap-*
 
-      - name: Make binary executable
-        run: chmod +x ./artifacts/wlsnap
+      - name: Organize release files
+        run: |
+          mkdir -p release
+          VERSION="${{ inputs.tag || github.ref_name }}"
+          VERSION_NO_V="${VERSION#v}"
+
+          # Binary with clear naming: wlsnap-{version}-x86_64-linux
+          cp "artifacts/wlsnap-x86_64-linux/wlsnap" "release/wlsnap-${VERSION_NO_V}-x86_64-linux"
+
+          # Checksums
+          cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.sha256" "release/wlsnap-${VERSION_NO_V}-x86_64-linux.sha256"
+          cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.md5" "release/wlsnap-${VERSION_NO_V}-x86_64-linux.md5"
+
+          # Source tarball (for AUR and other packagers)
+          git archive --format=tar.gz -o "release/wlsnap-${VERSION_NO_V}.tar.gz" "$VERSION"
+          cd release
+          sha256sum "wlsnap-${VERSION_NO_V}.tar.gz" > "wlsnap-${VERSION_NO_V}.tar.gz.sha256"
 
       - name: Generate changelog
         id: changelog
         run: |
-          # Determine the tag being released
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.tag }}"
-            git checkout "$VERSION"
-          else
-            VERSION="${{ github.ref_name }}"
-          fi
+          VERSION="${{ inputs.tag || github.ref_name }}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-          # Generate release notes from git log since last tag
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-          if [ -n "$PREVIOUS_TAG" ]; then
-            echo "## Changes since $PREVIOUS_TAG" > RELEASE_NOTES.md
-            echo "" >> RELEASE_NOTES.md
-            git log --pretty=format:'- %s' "$PREVIOUS_TAG"..HEAD >> RELEASE_NOTES.md
-          else
-            echo "## Initial release" > RELEASE_NOTES.md
-            echo "" >> RELEASE_NOTES.md
-            git log --pretty=format:'- %s' >> RELEASE_NOTES.md
-          fi
-          echo "" >> RELEASE_NOTES.md
-          echo "## Checksums" >> RELEASE_NOTES.md
-          echo '```' >> RELEASE_NOTES.md
-          sha256sum ./artifacts/wlsnap >> RELEASE_NOTES.md
-          echo '```' >> RELEASE_NOTES.md
+          {
+            echo "## What's Changed"
+            echo ""
+            if [ -n "$PREVIOUS_TAG" ]; then
+              git log --pretty=format:'- %s' "$PREVIOUS_TAG"..HEAD
+            else
+              git log --pretty=format:'- %s'
+            fi
+            echo ""
+            echo ""
+            echo "## Artifacts"
+            echo ""
+            echo "| File | Description |"
+            echo "|------|-------------|"
+            echo "| \`wlsnap-*.tar.gz\` | Source tarball (for AUR/build from source) |"
+            echo "| \`wlsnap-*-x86_64-linux\` | Linux x86_64 binary |"
+            echo "| \`*.sha256\` | SHA256 checksum |"
+            echo "| \`*.md5\` | MD5 checksum |"
+            echo ""
+            echo "## AUR Packaging"
+            echo ""
+            echo "The \`PKGBUILD\` in the repository uses the source tarball above."
+            echo "To update AUR on new release, bump \`pkgver\` and update \`sha256sums\`:"
+            echo ""
+            echo '```bash'
+            echo "pkgver=${VERSION#v}"
+            echo 'sha256sums=$(curl -sL "https://github.com/lingdiansr/wlsnap/releases/download/${VERSION}/wlsnap-${pkgver}.tar.gz" | sha256sum | cut -d" " -f1)'
+            echo '```'
+            echo ""
+            echo "## Checksums"
+            echo ""
+            echo "\`\`\`"
+            cat release/*.sha256
+            echo "\`\`\`"
+          } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -132,7 +193,7 @@ jobs:
           name: ${{ steps.changelog.outputs.version }}
           tag_name: ${{ steps.changelog.outputs.version }}
           body_path: RELEASE_NOTES.md
-          files: ./artifacts/wlsnap
+          files: release/*
           draft: false
           prerelease: ${{ contains(steps.changelog.outputs.version, 'alpha') || contains(steps.changelog.outputs.version, 'beta') || contains(steps.changelog.outputs.version, 'rc') }}
         env:
