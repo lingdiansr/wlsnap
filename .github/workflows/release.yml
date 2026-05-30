@@ -130,19 +130,18 @@ jobs:
         run: |
           mkdir -p release
           VERSION="${{ inputs.tag || github.ref_name }}"
-          VERSION_NO_V="${VERSION#v}"
 
-          # Binary with clear naming: wlsnap-{version}-x86_64-linux
-          cp "artifacts/wlsnap-x86_64-linux/wlsnap" "release/wlsnap-${VERSION_NO_V}-x86_64-linux"
+          # Binary with clear naming: wlsnap-v{version}-x86_64-linux
+          cp "artifacts/wlsnap-x86_64-linux/wlsnap" "release/wlsnap-${VERSION}-x86_64-linux"
 
           # Checksums
-          cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.sha256" "release/wlsnap-${VERSION_NO_V}-x86_64-linux.sha256"
-          cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.md5" "release/wlsnap-${VERSION_NO_V}-x86_64-linux.md5"
+          cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.sha256" "release/wlsnap-${VERSION}-x86_64-linux.sha256"
+          cp "artifacts/wlsnap-x86_64-linux-checksums/wlsnap.md5" "release/wlsnap-${VERSION}-x86_64-linux.md5"
 
           # Source tarball (for AUR and other packagers)
-          git archive --format=tar.gz -o "release/wlsnap-${VERSION_NO_V}.tar.gz" "$VERSION"
+          git archive --format=tar.gz -o "release/wlsnap-${VERSION}.tar.gz" "$VERSION"
           cd release
-          sha256sum "wlsnap-${VERSION_NO_V}.tar.gz" > "wlsnap-${VERSION_NO_V}.tar.gz.sha256"
+          sha256sum "wlsnap-${VERSION}.tar.gz" > "wlsnap-${VERSION}.tar.gz.sha256"
 
       - name: Generate changelog
         id: changelog
@@ -176,8 +175,8 @@ jobs:
             echo "To update AUR on new release, bump \`pkgver\` and update \`sha256sums\`:"
             echo ""
             echo '```bash'
-            echo "pkgver=${VERSION#v}"
-            echo 'sha256sums=$(curl -sL "https://github.com/lingdiansr/wlsnap/releases/download/${VERSION}/wlsnap-${pkgver}.tar.gz" | sha256sum | cut -d" " -f1)'
+            echo "pkgver=$VERSION"
+            echo 'sha256sums=$(curl -sL "https://github.com/lingdiansr/wlsnap/releases/download/${pkgver}/wlsnap-${pkgver}.tar.gz" | sha256sum | cut -d" " -f1)'
             echo '```'
             echo ""
             echo "## Checksums"
