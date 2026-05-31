@@ -110,15 +110,15 @@ impl eframe::App for SelectorApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.selector.logic(ctx, frame);
 
-        if self.selector.done {
-            if let Some(tx) = self.tx.take() {
-                let result = if self.selector.cancelled {
-                    None
-                } else {
-                    self.selector.selected_region
-                };
-                let _ = tx.send(result);
-            }
+        if self.selector.done
+            && let Some(tx) = self.tx.take()
+        {
+            let result = if self.selector.cancelled {
+                None
+            } else {
+                self.selector.selected_region
+            };
+            let _ = tx.send(result);
         }
     }
 
@@ -142,33 +142,33 @@ impl eframe::App for EframeSelector {
         // 2. Handle mouse input
         let pointer = ctx.input(|i| i.pointer.clone());
 
-        if pointer.button_pressed(egui::PointerButton::Primary) {
-            if let Some(pos) = pointer.interact_pos() {
-                self.drag_start = Some(pos);
-                self.drag_current = pos;
-            }
+        if pointer.button_pressed(egui::PointerButton::Primary)
+            && let Some(pos) = pointer.interact_pos()
+        {
+            self.drag_start = Some(pos);
+            self.drag_current = pos;
         }
 
-        if self.drag_start.is_some() {
-            if let Some(pos) = pointer.interact_pos() {
-                self.drag_current = pos;
-            }
+        if self.drag_start.is_some()
+            && let Some(pos) = pointer.interact_pos()
+        {
+            self.drag_current = pos;
         }
 
-        if pointer.button_released(egui::PointerButton::Primary) {
-            if let Some(start) = self.drag_start {
-                let rect = Rect::from_two_pos(start, self.drag_current);
-                let width = rect.width() as f64;
-                let height = rect.height() as f64;
+        if pointer.button_released(egui::PointerButton::Primary)
+            && let Some(start) = self.drag_start
+        {
+            let rect = Rect::from_two_pos(start, self.drag_current);
+            let width = rect.width() as f64;
+            let height = rect.height() as f64;
 
-                if width >= MIN_SELECTION_SIZE && height >= MIN_SELECTION_SIZE {
-                    self.selected_region = Some(rect_to_global_logical(&rect, &self.output));
-                }
-
-                self.done = true;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                return;
+            if width >= MIN_SELECTION_SIZE && height >= MIN_SELECTION_SIZE {
+                self.selected_region = Some(rect_to_global_logical(&rect, &self.output));
             }
+
+            self.done = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
         }
 
         // Request continuous repaint while dragging
