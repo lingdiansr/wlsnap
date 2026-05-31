@@ -93,6 +93,11 @@ pub fn needs_gui(cli: &Cli) -> bool {
         return true;
     }
 
+    // --area without coordinates needs interactive GUI selection
+    if cli.mode.area.as_ref().is_some_and(|s| s.is_empty()) {
+        return true;
+    }
+
     false
 }
 
@@ -115,8 +120,20 @@ pub fn run_cli_capture(cli: &Cli, config: &Config) -> Result<PathBuf> {
         }
     })?;
 
+    // If --area has coordinates, crop to the specified region.
+    let image = if let Some(ref coords) = cli.mode.area {
+        if !coords.is_empty() {
+            let region = crate::capture::region::parse_region_arg(coords)?;
+            crate::capture::region::crop_image(&captured.image, &region, &captured.source_output)
+        } else {
+            captured.image
+        }
+    } else {
+        captured.image
+    };
+
     let action = determine_output_action(cli, config);
-    dispatch(&captured.image, action, &config.general, &mode_name)
+    dispatch(&image, action, &config.general, &mode_name)
 }
 
 #[cfg(test)]
@@ -129,7 +146,7 @@ mod tests {
             mode: crate::cli::CaptureMode {
                 screen: true,
                 screen_all: false,
-                area: false,
+                area: None,
                 window: false,
                 pin: None,
                 scroll_auto: false,
@@ -344,7 +361,15 @@ mod tests {
     fn test_needs_gui_area() {
         let mut cli = make_cli_screen();
         cli.mode.screen = false;
-        cli.mode.area = true;
+        cli.mode.area = Some(String::new());
+        assert!(needs_gui(&cli));
+    }
+
+    #[test]
+    fn test_needs_gui_area_with_coords() {
+        let mut cli = make_cli_screen();
+        cli.mode.screen = false;
+        cli.mode.area = Some("100,200,500,400".into());
         assert!(!needs_gui(&cli));
     }
 

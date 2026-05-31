@@ -23,6 +23,9 @@ pub enum WlsnapError {
     #[error("Stitching failed: {0}")]
     Stitching(&'static str),
 
+    #[error("Region error: {0}")]
+    Region(String),
+
     #[error("Configuration error: {0}")]
     Config(String),
 

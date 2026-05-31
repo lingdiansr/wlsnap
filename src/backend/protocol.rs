@@ -11,6 +11,7 @@ use smithay_client_toolkit::registry::RegistryState;
 const EXT_IMAGE_COPY_CAPTURE: &str = "ext_image_copy_capture_manager_v1";
 const WLR_SCREENCOPY: &str = "zwlr_screencopy_manager_v1";
 const WLR_VIRTUAL_POINTER: &str = "zwlr_virtual_pointer_manager_v1";
+const WLR_LAYER_SHELL: &str = "zwlr_layer_shell_v1";
 
 /// Minimal state required by `wayland_client::globals::registry_queue_init`.
 struct ProbeState;
@@ -36,6 +37,7 @@ pub struct ProtocolProbe {
     has_ext_image_copy_capture: bool,
     has_wlr_screencopy: bool,
     has_virtual_pointer: bool,
+    has_layer_shell: bool,
     has_portal: bool,
 }
 
@@ -60,6 +62,7 @@ impl ProtocolProbe {
             has_ext_image_copy_capture: false,
             has_wlr_screencopy: false,
             has_virtual_pointer: false,
+            has_layer_shell: false,
             has_portal: check_portal(),
         };
 
@@ -91,6 +94,7 @@ impl ProtocolProbe {
                 EXT_IMAGE_COPY_CAPTURE => probe.has_ext_image_copy_capture = true,
                 WLR_SCREENCOPY => probe.has_wlr_screencopy = true,
                 WLR_VIRTUAL_POINTER => probe.has_virtual_pointer = true,
+                WLR_LAYER_SHELL => probe.has_layer_shell = true,
                 _ => {}
             }
         }
@@ -111,6 +115,11 @@ impl ProtocolProbe {
     /// `wlr-virtual-pointer-unstable-v1` is available.
     pub fn has_virtual_pointer(&self) -> bool {
         self.has_virtual_pointer
+    }
+
+    /// `zwlr_layer_shell_v1` is available.
+    pub fn has_layer_shell(&self) -> bool {
+        self.has_layer_shell
     }
 
     /// xdg-desktop-portal is reachable over D-Bus.
@@ -197,6 +206,7 @@ mod tests {
         assert!(!probe.has_ext_image_copy_capture());
         assert!(!probe.has_wlr_screencopy());
         assert!(!probe.has_virtual_pointer());
+        assert!(!probe.has_layer_shell());
     }
 
     /// When multiple backends are "present", the highest-priority one is recommended.
@@ -206,6 +216,7 @@ mod tests {
             has_ext_image_copy_capture: true,
             has_wlr_screencopy: true,
             has_virtual_pointer: false,
+            has_layer_shell: true,
             has_portal: true,
         };
         assert_eq!(probe.recommended_backend(), "ext-image-copy-capture-v1");
@@ -214,6 +225,7 @@ mod tests {
             has_ext_image_copy_capture: false,
             has_wlr_screencopy: true,
             has_virtual_pointer: false,
+            has_layer_shell: true,
             has_portal: true,
         };
         assert_eq!(probe.recommended_backend(), "xdg-desktop-portal");
@@ -222,6 +234,7 @@ mod tests {
             has_ext_image_copy_capture: false,
             has_wlr_screencopy: true,
             has_virtual_pointer: false,
+            has_layer_shell: false,
             has_portal: false,
         };
         assert_eq!(probe.recommended_backend(), "wlr-screencopy-unstable-v1");
@@ -230,6 +243,7 @@ mod tests {
             has_ext_image_copy_capture: false,
             has_wlr_screencopy: false,
             has_virtual_pointer: false,
+            has_layer_shell: false,
             has_portal: false,
         };
         assert_eq!(probe.recommended_backend(), "none");

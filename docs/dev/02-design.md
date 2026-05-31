@@ -808,29 +808,34 @@ CLI 显式参数 > 配置文件 > 默认值：
 
 **当前屏幕判定**：通过 `wl_pointer` 的 `wl_surface::enter` 事件或查询 pointer 所在 `wl_output` 确定。平台初始化时缓存所有 output 的几何信息，根据指针全局坐标匹配。
 
-### 7.2 区域选择（eframe 全屏窗口方案）
+### 7.2 区域选择（layer-shell overlay 方案）
 
-由于采用纯 eframe 方案，区域选择不再使用 layer-shell overlay，而是：
+交互式 `--area` 使用原生 `zwlr_layer_shell_v1` Overlay 层实现真正的全屏覆盖，体验最佳：
 
-1. 启动一个 **eframe 全屏无边框窗口** 覆盖当前指针所在屏幕。
-2. 窗口背景绘制为半透明黑色（ARGB `#80000000`），使用 `egui::Area` + `egui::Shape::rect_filled`。
-3. 监听鼠标事件（在 `egui::Response` 上）：
-   - `pointer_press` → 记录选区起点
-   - `pointer_drag` → 实时更新选区矩形，重绘高亮框 + 尺寸标注
-   - `pointer_release` → 确认选区，关闭全屏窗口，进入 `Capturing` 状态
-4. `Esc` 键取消选择，回到 `Idle`。
+1. 通过 sctk 创建 `LayerSurface`，设置 `Layer::Overlay` + `Anchor::ALL` + `KeyboardInteractivity::Exclusive`。
+2. 使用 `wl_shm` + `SlotPool` 进行软件渲染：
+   - 全屏填充半透明黑色遮罩（ARGB `#80000000`）
+   - 拖拽时绘制高亮矩形（ARGB `#40000000`）+ 白色边框
+   - 实时显示选区尺寸标签
+3. 监听输入事件：
+   - `wl_pointer::Press { button: 272 }` → 记录选区起点
+   - `wl_pointer::Motion` → 实时更新选区，请求 `wl_surface::frame` 重绘
+   - `wl_pointer::Release { button: 272 }` → 确认选区，退出事件循环
+   - `wl_keyboard::Escape` → 取消选择
+4. 返回 `LogicalRect` 后，主流程将其转换为 `--area x,y,w,h` 并走 headless 捕获路径。
+
+**GNOME 降级**：GNOME 不实现 `wlr-layer-shell`，交互式 `--area` 退化为 eframe 全屏无边框窗口方案（无边框 + `set_fullscreen(true)` + 半透明遮罩）。
 
 ```rust
-// src/ui/selector.rs 核心逻辑
+// src/ui/layer_selector.rs 核心逻辑
 
-pub fn render_selector(ctx: &egui::Context, state: &mut SelectingRegionState) -> Option<LogicalRect> {
-    let screen_rect = ctx.screen_rect(); // 全屏窗口即整个屏幕逻辑区域
-    let response = ctx.layer_painter(egui::LayerId::background()).rect_filled(
-        screen_rect, 0.0, egui::Color32::from_black_alpha(128)
-    );
-
-    // 绘制选区...
-    // 返回最终选区或 None
+impl LayerSelector {
+    pub fn run() -> Option<LogicalRect> {
+        // 1. 连接 Wayland，绑定 layer_shell
+        // 2. 创建 Overlay 全屏 surface
+        // 3. 运行 blocking_dispatch 事件循环
+        // 4. 返回 selected_region 或 None（取消）
+    }
 }
 ```
 
@@ -1214,7 +1219,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 模块 | 交付内容 | 说明 |
 |------|----------|------|
 | backend | `wlr-screencopy` 后端；协议探测框架 | 仅支持 wlroots 系 compositor |
-| capture | 单屏/全屏捕获；多屏拼接（`--full-all`）；硬编码区域（`--area`） | `--area` 不启动 GUI 选区，接受坐标参数或后续由外部工具提供 |
+| capture | 单屏/全屏捕获；多屏拼接（`--full-all`）；区域截图（`--area` 坐标 / `--area` 交互选区） | `--area` 支持直接坐标（headless）和交互选区（layer-shell overlay）两种模式 |
 | ui | eframe 最小窗口（仅用于事件循环，无实际 GUI 交互） | v0.1.0 不显示编辑器、选区、Pin 窗口 |
 | output_manager | 保存（PNG/JPEG/WebP）；剪贴板（arboard）；stdout 输出；`--exec` | 完整输出分发 |
 | config | TOML 解析；默认值；路径占位符展开 | |
@@ -1270,8 +1275,8 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
-| UI 窗口方案 | 纯 eframe（无边框全屏/小窗） | 避免 egui 与 layer-shell 的复杂集成，开发成本低，compositor 兼容性好 |
-| 区域选择 | eframe 全屏无边框窗口 | 在当前指针所在屏幕上绘制遮罩+选框，无需 layer-shell |
+| UI 窗口方案 | eframe + 独立 sctk layer-shell | 区域选择使用原生 layer-shell overlay（体验最佳），编辑器/Pin 仍用 eframe；避免 egui 与 layer-shell 的复杂集成 |
+| 区域选择 | **layer-shell overlay**（首选）/ eframe 全屏无边框窗口（GNOME 降级） | 使用 `zwlr_layer_shell_v1` Overlay 层实现真正的全屏覆盖；GNOME 无 layer-shell，退化为 eframe 无边框全屏窗口 |
 | 多屏处理 | 默认当前屏幕；`--full-all` 拼接所有 | 简化用户体验，避免跨屏选区的坐标复杂性 |
 | 异步架构 | tokio runtime + mpsc channel | 后端 Wayland 协议需要 async，eframe 是同步的，channel 是最简单的桥接 |
 | 单实例 | Unix domain socket | 比文件锁更可靠，天然支持命令转发 |

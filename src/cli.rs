@@ -61,9 +61,10 @@ pub struct CaptureMode {
     #[arg(long)]
     pub screen_all: bool,
 
-    /// Capture the current screen (same as --full in v0.1.0)
-    #[arg(long)]
-    pub area: bool,
+    /// Capture a region. Without value: interactive selection.
+    /// With value: direct crop using "x,y,w,h" coordinates.
+    #[arg(long, value_name = "X,Y,W,H", num_args = 0..=1, default_missing_value = "")]
+    pub area: Option<String>,
 
     /// Capture a specific window (interactive, requires GUI)
     #[arg(long)]
@@ -90,7 +91,7 @@ impl CaptureMode {
             "screen"
         } else if self.screen_all {
             "screen_all"
-        } else if self.area {
+        } else if self.area.is_some() {
             "area"
         } else if self.window {
             "window"
@@ -128,15 +129,23 @@ mod tests {
     fn parse_screen_flag() {
         let cli = Cli::try_parse_from(["wlsnap", "--screen"]).unwrap();
         assert!(cli.mode.screen);
-        assert!(!cli.mode.area);
+        assert!(cli.mode.area.is_none());
         assert_eq!(cli.mode.selected_mode_name(), "screen");
     }
 
     #[test]
     fn parse_area_and_stdout() {
         let cli = Cli::try_parse_from(["wlsnap", "--area", "--stdout"]).unwrap();
-        assert!(cli.mode.area);
+        // --area without value gives Some("") in clap
+        assert!(cli.mode.area.is_some());
         assert!(cli.stdout);
+        assert_eq!(cli.mode.selected_mode_name(), "area");
+    }
+
+    #[test]
+    fn parse_area_with_coords() {
+        let cli = Cli::try_parse_from(["wlsnap", "--area", "100,200,500,400"]).unwrap();
+        assert_eq!(cli.mode.area, Some("100,200,500,400".into()));
         assert_eq!(cli.mode.selected_mode_name(), "area");
     }
 

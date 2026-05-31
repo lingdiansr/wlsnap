@@ -1,7 +1,7 @@
 //! Region selection parameter validation.
 
 use crate::error::{Result, WlsnapError};
-use crate::platform::output_info::{LogicalRect, OutputInfo};
+use crate::platform::output_info::{LogicalPoint, LogicalRect, OutputInfo};
 
 /// Validate that a region is within the bounds of the given output.
 /// Returns an error if the region is empty, negative-sized, or outside the output.
@@ -57,6 +57,43 @@ pub fn crop_image(
     let height = height.min(img_h - y);
 
     image::imageops::crop_imm(image, x, y, width, height).to_image()
+}
+
+/// Parse a region coordinate string in the format "x,y,w,h".
+///
+/// Returns a `LogicalRect` with the parsed coordinates.
+/// All values are in logical pixels.
+pub fn parse_region_arg(s: &str) -> Result<LogicalRect> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 4 {
+        return Err(WlsnapError::Region(
+            "region format must be 'x,y,w,h'".into(),
+        ));
+    }
+
+    let parse = |idx: usize, name: &str| -> Result<f64> {
+        parts[idx]
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| WlsnapError::Region(format!("invalid {} in region", name)))
+    };
+
+    let x = parse(0, "x")?;
+    let y = parse(1, "y")?;
+    let w = parse(2, "width")?;
+    let h = parse(3, "height")?;
+
+    if w <= 0.0 {
+        return Err(WlsnapError::Region("region width must be positive".into()));
+    }
+    if h <= 0.0 {
+        return Err(WlsnapError::Region("region height must be positive".into()));
+    }
+
+    Ok(LogicalRect {
+        min: LogicalPoint { x, y },
+        max: LogicalPoint { x: x + w, y: y + h },
+    })
 }
 
 #[cfg(test)]
@@ -224,5 +261,31 @@ mod tests {
 
         let cropped = crop_image(&img, &region, &output);
         assert_eq!(cropped.dimensions(), (10, 10));
+    }
+
+    #[test]
+    fn parse_region_arg_valid() {
+        let region = parse_region_arg("100,200,500,400").unwrap();
+        assert_eq!(region.min.x, 100.0);
+        assert_eq!(region.min.y, 200.0);
+        assert_eq!(region.max.x, 600.0);
+        assert_eq!(region.max.y, 600.0);
+    }
+
+    #[test]
+    fn parse_region_arg_invalid_format() {
+        assert!(parse_region_arg("100,200").is_err());
+        assert!(parse_region_arg("100,200,500").is_err());
+        assert!(parse_region_arg("").is_err());
+    }
+
+    #[test]
+    fn parse_region_arg_invalid_number() {
+        assert!(parse_region_arg("a,200,500,400").is_err());
+    }
+
+    #[test]
+    fn parse_region_arg_zero_width() {
+        assert!(parse_region_arg("100,200,0,400").is_err());
     }
 }
