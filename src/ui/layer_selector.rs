@@ -124,7 +124,7 @@ impl LayerSelector {
     }
 
     /// Draw the overlay to the layer surface.
-    fn draw(&mut self, qh: &QueueHandle<Self>) {
+    fn draw(&mut self, _qh: &QueueHandle<Self>) {
         let width = self.width;
         let height = self.height;
         let stride = width as i32 * 4;
@@ -208,7 +208,7 @@ impl LayerSelector {
         self.layer
             .wl_surface()
             .damage_buffer(0, 0, width as i32, height as i32);
-        self.layer.wl_surface().frame(qh, self.layer.wl_surface().clone());
+        // No frame callback needed — we only redraw on user interaction.
         buffer.attach_to(self.layer.wl_surface()).expect("buffer attach");
         self.layer.commit();
     }
@@ -338,11 +338,12 @@ impl CompositorHandler for LayerSelector {
     fn frame(
         &mut self,
         _conn: &Connection,
-        qh: &QueueHandle<Self>,
+        _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
-        self.draw(qh);
+        // Intentionally empty: we do not need continuous animation.
+        // The selector only redraws on pointer interaction.
     }
 
     fn surface_enter(
