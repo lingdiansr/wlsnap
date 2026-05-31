@@ -11,6 +11,23 @@ use std::sync::mpsc;
 /// Minimum side length (in logical pixels) for a selection to be considered valid.
 const MIN_SELECTION_SIZE: f64 = 10.0;
 
+/// Convert an egui Rect (screen-local coordinates) to global LogicalRect.
+fn rect_to_global_logical(rect: &Rect, output: &OutputInfo) -> LogicalRect {
+    let offset_x = output.logical_geometry.min.x;
+    let offset_y = output.logical_geometry.min.y;
+
+    LogicalRect {
+        min: LogicalPoint {
+            x: rect.min.x as f64 + offset_x,
+            y: rect.min.y as f64 + offset_y,
+        },
+        max: LogicalPoint {
+            x: rect.max.x as f64 + offset_x,
+            y: rect.max.y as f64 + offset_y,
+        },
+    }
+}
+
 /// State machine for the eframe area selector.
 pub struct EframeSelector {
     /// The output (monitor) on which selection happens.
@@ -145,15 +162,7 @@ impl eframe::App for EframeSelector {
                 let height = rect.height() as f64;
 
                 if width >= MIN_SELECTION_SIZE && height >= MIN_SELECTION_SIZE {
-                    let min = LogicalPoint {
-                        x: (rect.min.x as f64) + self.output.logical_geometry.min.x,
-                        y: (rect.min.y as f64) + self.output.logical_geometry.min.y,
-                    };
-                    let max = LogicalPoint {
-                        x: (rect.max.x as f64) + self.output.logical_geometry.min.x,
-                        y: (rect.max.y as f64) + self.output.logical_geometry.min.y,
-                    };
-                    self.selected_region = Some(LogicalRect { min, max });
+                    self.selected_region = Some(rect_to_global_logical(&rect, &self.output));
                 }
 
                 self.done = true;
@@ -221,5 +230,63 @@ impl eframe::App for EframeSelector {
             screen_rect.max.y - 40.0,
         );
         painter.galley(hint_pos, galley, Color32::WHITE);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::output_info::{LogicalPoint, LogicalRect, OutputTransform};
+
+    fn make_output(x: f64, y: f64, w: f64, h: f64) -> OutputInfo {
+        OutputInfo {
+            name: "test".to_string(),
+            description: String::new(),
+            logical_geometry: LogicalRect {
+                min: LogicalPoint { x, y },
+                max: LogicalPoint { x: x + w, y: y + h },
+            },
+            physical_size: (w as u32, h as u32),
+            scale_factor: 1.0,
+            transform: OutputTransform::Normal,
+        }
+    }
+
+    #[test]
+    fn rect_to_global_logical_at_origin() {
+        let output = make_output(0.0, 0.0, 1920.0, 1080.0);
+        let rect = Rect::from_min_max(Pos2::new(100.0, 200.0), Pos2::new(500.0, 600.0));
+        let region = rect_to_global_logical(&rect, &output);
+
+        assert_eq!(region.min.x, 100.0);
+        assert_eq!(region.min.y, 200.0);
+        assert_eq!(region.max.x, 500.0);
+        assert_eq!(region.max.y, 600.0);
+    }
+
+    #[test]
+    fn rect_to_global_logical_with_offset() {
+        let output = make_output(1920.0, 0.0, 1920.0, 1080.0);
+        let rect = Rect::from_min_max(Pos2::new(100.0, 200.0), Pos2::new(500.0, 600.0));
+        let region = rect_to_global_logical(&rect, &output);
+
+        assert_eq!(region.min.x, 2020.0); // 1920 + 100
+        assert_eq!(region.min.y, 200.0);
+        assert_eq!(region.max.x, 2420.0); // 1920 + 500
+        assert_eq!(region.max.y, 600.0);
+    }
+
+    #[test]
+    fn rect_to_global_logical_negative_coords() {
+        // Rect where user dragged from bottom-right to top-left
+        // egui::Rect::from_two_pos normalizes, so min is (100, 200), max is (500, 600)
+        let output = make_output(0.0, 0.0, 1920.0, 1080.0);
+        let rect = Rect::from_two_pos(Pos2::new(500.0, 600.0), Pos2::new(100.0, 200.0));
+        let region = rect_to_global_logical(&rect, &output);
+
+        assert_eq!(region.min.x, 100.0);
+        assert_eq!(region.min.y, 200.0);
+        assert_eq!(region.max.x, 500.0);
+        assert_eq!(region.max.y, 600.0);
     }
 }
