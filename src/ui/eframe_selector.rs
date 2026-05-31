@@ -6,6 +6,7 @@
 
 use egui::{Color32, FontId, Pos2, Rect, Stroke};
 use crate::platform::output_info::{LogicalPoint, LogicalRect, OutputInfo};
+use std::sync::mpsc;
 
 /// Minimum side length (in logical pixels) for a selection to be considered valid.
 const MIN_SELECTION_SIZE: f64 = 10.0;
@@ -37,6 +38,75 @@ impl EframeSelector {
             cancelled: false,
             done: false,
         }
+    }
+
+    /// Run the eframe area selector and return the selected region, if any.
+    pub fn run() -> Option<LogicalRect> {
+        // 1. Enumerate outputs
+        let outputs = match crate::platform::wayland::enumerate_outputs() {
+            Ok(o) => o,
+            Err(_) => return None,
+        };
+        if outputs.is_empty() {
+            return None;
+        }
+
+        // 2. Select output (first for now)
+        // TODO: pointer-based output selection
+        let output = outputs.into_iter().next().unwrap();
+
+        let (tx, rx) = mpsc::channel();
+
+        let selector = EframeSelector::new(output);
+        let app = SelectorApp {
+            selector,
+            tx: Some(tx),
+        };
+
+        let options = eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_decorations(false)
+                .with_fullscreen(true)
+                .with_always_on_top(),
+            ..Default::default()
+        };
+
+        // 4. Run event loop (ignore result, we get the value through the channel)
+        let _ = eframe::run_native(
+            "wlsnap area selector",
+            options,
+            Box::new(|_cc| Ok(Box::new(app))),
+        );
+
+        // 5. Return result
+        rx.recv().unwrap_or(None)
+    }
+}
+
+/// Wrapper that holds [`EframeSelector`] and a channel sender to return the result.
+struct SelectorApp {
+    selector: EframeSelector,
+    tx: Option<mpsc::Sender<Option<LogicalRect>>>,
+}
+
+impl eframe::App for SelectorApp {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.selector.logic(ctx, frame);
+
+        if self.selector.done {
+            if let Some(tx) = self.tx.take() {
+                let result = if self.selector.cancelled {
+                    None
+                } else {
+                    self.selector.selected_region
+                };
+                let _ = tx.send(result);
+            }
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.selector.ui(ui, frame);
     }
 }
 
