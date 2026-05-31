@@ -25,7 +25,7 @@ use smithay_client_toolkit::{
         },
         WaylandSurface,
     },
-    shm::{slot::SlotPool, Shm, ShmHandler},
+    shm::{slot::{Slot, SlotPool}, Shm, ShmHandler},
 };
 use wayland_client::{
     globals::registry_queue_init,
@@ -67,6 +67,14 @@ pub struct LayerSelector {
     /// Exit flags.
     exit: bool,
     cancelled: bool,
+
+    /// Throttle redraws: only redraw when the mouse has moved at least this many pixels.
+    last_drawn_pos: Option<(f64, f64)>,
+
+    // Double-buffered slots to avoid page-faults on every draw.
+    slot_a: Option<Slot>,
+    slot_b: Option<Slot>,
+    use_slot_b: bool,
 }
 
 impl LayerSelector {
@@ -112,6 +120,10 @@ impl LayerSelector {
             selected_region: None,
             exit: false,
             cancelled: false,
+            last_drawn_pos: None,
+            slot_a: None,
+            slot_b: None,
+            use_slot_b: false,
         };
 
         while !selector.exit {
@@ -125,34 +137,54 @@ impl LayerSelector {
 
     /// Draw the overlay to the layer surface.
     fn draw(&mut self, _qh: &QueueHandle<Self>) {
-        let t0 = std::time::Instant::now();
-        
         let width = self.width;
         let height = self.height;
         let stride = width as i32 * 4;
         let buf_size = (stride * height as i32) as usize;
 
-        // Resize pool if needed.
-        if self.pool.len() < buf_size {
-            let t_resize = std::time::Instant::now();
-            let _ = self.pool.resize(buf_size);
-            tracing::debug!("pool.resize took {:?}", t_resize.elapsed());
-        }
+        // Pick the next slot, falling back to the other if it is still active.
+        let (slot_ref, next_use_b) = if self.use_slot_b {
+            if let Some(ref slot) = self.slot_b {
+                if !slot.has_active_buffers() {
+                    (slot, false)
+                } else if let Some(ref slot_a) = self.slot_a {
+                    (slot_a, false)
+                } else {
+                    return;
+                }
+            } else if let Some(ref slot_a) = self.slot_a {
+                (slot_a, false)
+            } else {
+                return;
+            }
+        } else {
+            if let Some(ref slot) = self.slot_a {
+                if !slot.has_active_buffers() {
+                    (slot, true)
+                } else if let Some(ref slot_b) = self.slot_b {
+                    (slot_b, true)
+                } else {
+                    return;
+                }
+            } else if let Some(ref slot_b) = self.slot_b {
+                (slot_b, true)
+            } else {
+                return;
+            }
+        };
+        self.use_slot_b = next_use_b;
 
-        let t_buf = std::time::Instant::now();
-        let (buffer, canvas) = self
+        let buffer = self
             .pool
-            .create_buffer(width as i32, height as i32, stride, wl_shm::Format::Argb8888)
-            .expect("create buffer");
-        tracing::debug!("create_buffer took {:?}", t_buf.elapsed());
+            .create_buffer_in(slot_ref, width as i32, height as i32, stride, wl_shm::Format::Argb8888)
+            .expect("create buffer in slot");
+        let canvas = self.pool.raw_data_mut(slot_ref);
 
         // Fill entire screen with mask.
-        let t_fill = std::time::Instant::now();
         let mask_bytes = MASK_COLOR.to_le_bytes();
-        for chunk in canvas.chunks_exact_mut(4) {
+        for chunk in canvas[..buf_size].chunks_exact_mut(4) {
             chunk.copy_from_slice(&mask_bytes);
         }
-        tracing::debug!("mask fill took {:?}", t_fill.elapsed());
 
         // Draw selection highlight if dragging.
         if let Some(start) = self.drag_start {
@@ -167,7 +199,6 @@ impl LayerSelector {
             let y2_i = y2 as i32;
 
             // Fill highlight inside selection.
-            let t_highlight = std::time::Instant::now();
             let highlight_bytes = HIGHLIGHT_COLOR.to_le_bytes();
             for y in y1_i..y2_i {
                 if y < 0 || y >= height as i32 {
@@ -182,10 +213,8 @@ impl LayerSelector {
                     canvas[offset..offset + 4].copy_from_slice(&highlight_bytes);
                 }
             }
-            tracing::debug!("highlight fill took {:?}", t_highlight.elapsed());
 
             // Draw border.
-            let t_border = std::time::Instant::now();
             draw_rect_border(
                 canvas,
                 width,
@@ -198,38 +227,29 @@ impl LayerSelector {
                 },
                 BORDER_COLOR,
             );
-            tracing::debug!("border draw took {:?}", t_border.elapsed());
 
             // Draw size label near bottom-right of selection.
-            let t_label = std::time::Instant::now();
             let w = (x2 - x1) as i32;
             let h = (y2 - y1) as i32;
             let label = format!("{}x{}", w, h);
             let label_x = (x2_i - label.len() as i32 * 8).max(4);
             let label_y = (y2_i - 16).max(4);
             draw_text(canvas, width, height, label_x, label_y, &label, TEXT_COLOR);
-            tracing::debug!("label draw took {:?}", t_label.elapsed());
         }
 
         // Draw hint text at bottom center.
-        let t_hint = std::time::Instant::now();
         let hint = "Esc cancel | Drag to select";
         let hint_x = (width as i32 - hint.len() as i32 * 8) / 2;
         let hint_y = height as i32 - 30;
         draw_text(canvas, width, height, hint_x, hint_y, &hint, TEXT_COLOR);
-        tracing::debug!("hint draw took {:?}", t_hint.elapsed());
 
         // Damage entire surface and present.
-        let t_commit = std::time::Instant::now();
         self.layer
             .wl_surface()
             .damage_buffer(0, 0, width as i32, height as i32);
         // No frame callback needed — we only redraw on user interaction.
         buffer.attach_to(self.layer.wl_surface()).expect("buffer attach");
         self.layer.commit();
-        tracing::debug!("commit took {:?}", t_commit.elapsed());
-        
-        tracing::info!("draw() total: {:?} ({}x{})", t0.elapsed(), width, height);
     }
 }
 
@@ -430,6 +450,30 @@ impl LayerShellHandler for LayerSelector {
     ) {
         self.width = NonZeroU32::new(configure.new_size.0).map_or(256, NonZeroU32::get);
         self.height = NonZeroU32::new(configure.new_size.1).map_or(256, NonZeroU32::get);
+
+        // Pre-allocate and warm-up double-buffered slots to avoid page-faults on every draw.
+        let stride = self.width as i32 * 4;
+        let buf_size = (stride * self.height as i32) as usize;
+        if self.pool.len() < buf_size * 2 {
+            let _ = self.pool.resize(buf_size * 2);
+        }
+        if self.slot_a.is_none() {
+            if let Ok(slot) = self.pool.new_slot(buf_size) {
+                if let Some(data) = self.pool.raw_data_mut(&slot).get_mut(..buf_size) {
+                    data.fill(0x00);
+                }
+                self.slot_a = Some(slot);
+            }
+        }
+        if self.slot_b.is_none() {
+            if let Ok(slot) = self.pool.new_slot(buf_size) {
+                if let Some(data) = self.pool.raw_data_mut(&slot).get_mut(..buf_size) {
+                    data.fill(0x00);
+                }
+                self.slot_b = Some(slot);
+            }
+        }
+
         self.draw(qh);
     }
 }
