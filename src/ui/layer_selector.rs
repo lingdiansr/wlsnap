@@ -216,18 +216,14 @@ fn render_selector(
     // Hint text
     draw_label(&mut pixmap, width as f32 / 2.0, height as f32 - 30.0, "Esc cancel | Drag to select");
 
-    // Copy from pixmap (RGBA) to canvas (ARGB/BGRA for Wayland)
+    // Copy from pixmap (RGBA) to canvas (BGRA for Wayland ARGB8888)
+    // tiny-skia stores as RGBA; Wayland ARGB8888 expects BGRA in memory.
     let data = pixmap.data();
-    for y in 0..height {
-        for x in 0..width {
-            let src = ((y * width + x) * 4) as usize;
-            let dst = ((y * width + x) * 4) as usize;
-            // RGBA -> BGRA (Wayland ARGB8888 is actually BGRA in memory)
-            canvas[dst] = data[src + 2];     // B
-            canvas[dst + 1] = data[src + 1]; // G
-            canvas[dst + 2] = data[src];     // R
-            canvas[dst + 3] = data[src + 3]; // A
-        }
+    for (dst_chunk, src_chunk) in canvas.chunks_exact_mut(4).zip(data.chunks_exact(4)) {
+        dst_chunk[0] = src_chunk[2]; // B
+        dst_chunk[1] = src_chunk[1]; // G
+        dst_chunk[2] = src_chunk[0]; // R
+        dst_chunk[3] = src_chunk[3]; // A
     }
 }
 
