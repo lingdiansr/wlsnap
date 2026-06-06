@@ -5,6 +5,7 @@
 //! in logical coordinates.
 
 use std::num::NonZeroU32;
+use std::time::{Duration, Instant};
 
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -25,7 +26,7 @@ use smithay_client_toolkit::{
         },
         WaylandSurface,
     },
-    shm::{slot::SlotPool, Shm, ShmHandler},
+    shm::{slot::{Slot, SlotPool}, Shm, ShmHandler},
 };
 use wayland_client::{
     globals::registry_queue_init,
@@ -39,10 +40,10 @@ use crate::platform::output_info::{LogicalPoint, LogicalRect};
 const MIN_SELECTION_SIZE: f64 = 10.0;
 
 /// ARGB color constants.
-const MASK_COLOR: u32 = 0x8000_0000; // semi-transparent black
-const HIGHLIGHT_COLOR: u32 = 0x4000_0000; // lighter inside selection
-const BORDER_COLOR: u32 = 0xFFFF_FFFF; // white border
-const TEXT_COLOR: u32 = 0xFFFF_FFFF; // white text
+const _MASK_COLOR: u32 = 0x8000_0000; // semi-transparent black
+const _HIGHLIGHT_COLOR: u32 = 0x4000_0000; // lighter inside selection
+const _BORDER_COLOR: u32 = 0xFFFF_FFFF; // white border
+const _TEXT_COLOR: u32 = 0xFFFF_FFFF; // white text
 
 /// Interactive region selector using layer-shell overlay.
 pub struct LayerSelector {
@@ -67,6 +68,15 @@ pub struct LayerSelector {
     /// Exit flags.
     exit: bool,
     cancelled: bool,
+
+    /// Throttle redraws during motion.
+    last_draw_time: Option<Instant>,
+    last_drawn_pos: Option<(f64, f64)>,
+
+    // Double-buffered slots to avoid page-faults and pool growth.
+    slot_a: Option<Slot>,
+    slot_b: Option<Slot>,
+    use_slot_b: bool,
 }
 
 impl LayerSelector {
@@ -91,6 +101,7 @@ impl LayerSelector {
 
         layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
         layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+        layer.set_exclusive_zone(-1);
         layer.set_size(0, 0);
         layer.commit();
 
@@ -112,6 +123,11 @@ impl LayerSelector {
             selected_region: None,
             exit: false,
             cancelled: false,
+            last_draw_time: None,
+            last_drawn_pos: None,
+            slot_a: None,
+            slot_b: None,
+            use_slot_b: false,
         };
 
         while !selector.exit {
@@ -130,18 +146,42 @@ impl LayerSelector {
         let stride = width as i32 * 4;
         let buf_size = (stride * height as i32) as usize;
 
-        // Resize pool if needed.
-        if self.pool.len() < buf_size {
-            let _ = self.pool.resize(buf_size);
+        // Ensure pool is big enough for two slots.
+        if self.pool.len() < buf_size * 2 {
+            let _ = self.pool.resize(buf_size * 2);
         }
 
-        let (buffer, canvas) = self
+        // Pre-allocate slots on first configure.
+        if self.slot_a.is_none() {
+            if let Ok(slot) = self.pool.new_slot(buf_size) {
+                self.slot_a = Some(slot);
+            }
+        }
+        if self.slot_b.is_none() {
+            if let Ok(slot) = self.pool.new_slot(buf_size) {
+                self.slot_b = Some(slot);
+            }
+        }
+
+        // Simple round-robin between the two slots.
+        let slot_ref = if self.use_slot_b {
+            self.slot_b.as_ref().or(self.slot_a.as_ref())
+        } else {
+            self.slot_a.as_ref().or(self.slot_b.as_ref())
+        };
+        let Some(slot_ref) = slot_ref else {
+            return;
+        };
+        self.use_slot_b = !self.use_slot_b;
+
+        let buffer = self
             .pool
-            .create_buffer(width as i32, height as i32, stride, wl_shm::Format::Argb8888)
-            .expect("create buffer");
+            .create_buffer_in(slot_ref, width as i32, height as i32, stride, wl_shm::Format::Argb8888)
+            .expect("create buffer in slot");
+        let canvas = self.pool.raw_data_mut(slot_ref);
 
         // Use tiny-skia to render the overlay.
-        render_selector(canvas, width, height, self.drag_start, self.drag_current);
+        render_selector(&mut canvas[..buf_size], width, height, self.drag_start, self.drag_current);
 
         // Damage entire surface and present.
         self.layer
@@ -150,6 +190,31 @@ impl LayerSelector {
         // No frame callback needed — we only redraw on user interaction.
         buffer.attach_to(self.layer.wl_surface()).expect("buffer attach");
         self.layer.commit();
+
+        self.last_draw_time = Some(Instant::now());
+        self.last_drawn_pos = Some(self.drag_current);
+    }
+
+    /// Check if we should redraw based on time and distance throttling.
+    fn should_redraw(&self) -> bool {
+        const MIN_TIME_BETWEEN_DRAWS: Duration = Duration::from_millis(16);
+        const MIN_DISTANCE: f64 = 2.0;
+
+        if let Some(last_time) = self.last_draw_time {
+            if Instant::now().duration_since(last_time) < MIN_TIME_BETWEEN_DRAWS {
+                return false;
+            }
+        }
+
+        if let Some(last_pos) = self.last_drawn_pos {
+            let dx = self.drag_current.0 - last_pos.0;
+            let dy = self.drag_current.1 - last_pos.1;
+            if dx.abs() < MIN_DISTANCE && dy.abs() < MIN_DISTANCE {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -219,72 +284,97 @@ fn render_selector(
     // Copy from pixmap (RGBA) to canvas (BGRA for Wayland ARGB8888)
     // tiny-skia stores as RGBA; Wayland ARGB8888 expects BGRA in memory.
     let data = pixmap.data();
-    for (dst_chunk, src_chunk) in canvas.chunks_exact_mut(4).zip(data.chunks_exact(4)) {
-        dst_chunk[0] = src_chunk[2]; // B
-        dst_chunk[1] = src_chunk[1]; // G
-        dst_chunk[2] = src_chunk[0]; // R
-        dst_chunk[3] = src_chunk[3]; // A
+    unsafe {
+        let src = data.as_ptr();
+        let dst = canvas.as_mut_ptr();
+        let count = (width * height) as usize;
+        for i in 0..count {
+            let s = src.add(i * 4);
+            let d = dst.add(i * 4);
+            // B G R A
+            d.write(s.add(2).read());
+            d.add(1).write(s.add(1).read());
+            d.add(2).write(s.read());
+            d.add(3).write(s.add(3).read());
+        }
     }
 }
 
-/// Draw a simple text label using tiny-skia (basic pixel font).
+/// Global fontdue font (lazily initialized).
+static FONT: std::sync::OnceLock<fontdue::Font> = std::sync::OnceLock::new();
+
+fn get_font() -> &'static fontdue::Font {
+    FONT.get_or_init(|| {
+        let font_data = std::fs::read("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
+            .or_else(|_| std::fs::read("/usr/share/fonts/TTF/DejaVuSansMono.ttf"))
+            .or_else(|_| std::fs::read("/usr/share/fonts/dejavu/DejaVuSansMono.ttf"))
+            .unwrap_or_else(|_| include_bytes!("../../assets/DejaVuSansMono.ttf").to_vec());
+        fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())
+            .expect("failed to load font")
+    })
+}
+
+/// Cached glyph bitmaps keyed by (char, font_size_as_u8).
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+type GlyphCache = HashMap<(char, u8), (fontdue::Metrics, Vec<u8>)>;
+static GLYPH_CACHE: Mutex<Option<GlyphCache>> = Mutex::new(None);
+
+fn get_glyph(ch: char, font_size: f32) -> (fontdue::Metrics, Vec<u8>) {
+    let key = (ch, font_size as u8);
+    let mut cache_lock = GLYPH_CACHE.lock().unwrap();
+    let cache = cache_lock.get_or_insert_with(HashMap::new);
+    if let Some(entry) = cache.get(&key) {
+        return entry.clone();
+    }
+    let font = get_font();
+    let result = font.rasterize(ch, font_size);
+    cache.insert(key, result.clone());
+    result
+}
+
+/// Draw a text label using fontdue + tiny-skia.
 fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
     use tiny_skia::{Color, Paint, Transform};
 
+    let font_size = 14.0;
     let mut paint = Paint::default();
     paint.set_color(Color::from_rgba8(255, 255, 255, 255));
-    paint.anti_alias = false;
+    paint.anti_alias = true;
 
-    let scale = 2.0;
-    let mut cx = x - (text.len() as f32 * 5.0 * scale) / 2.0;
-    let cy = y;
+    // Measure total width.
+    let mut total_width = 0.0f32;
+    for ch in text.chars() {
+        let metrics = get_glyph(ch, font_size).0;
+        total_width += metrics.advance_width;
+    }
+
+    let mut cx = x - total_width / 2.0;
+    let baseline = y + font_size * 0.35;
 
     for ch in text.chars() {
-        let pattern = char_pattern(ch);
-        for (row, &bits) in pattern.iter().enumerate() {
-            for col in 0..5u32 {
-                if (bits >> (4 - col)) & 1 != 0 {
-                    let px = cx + col as f32 * scale;
-                    let py = cy + row as f32 * scale;
-                    if let Some(rect) = tiny_skia::Rect::from_xywh(px, py, scale, scale) {
-                        pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+        let (metrics, bitmap) = get_glyph(ch, font_size);
+        let gw = metrics.width;
+        let gh = metrics.height;
+        let gx = cx + metrics.xmin as f32;
+        let gy = baseline - metrics.ymin as f32 - gh as f32;
+
+        for row in 0..gh {
+            for col in 0..gw {
+                let alpha = bitmap[row * gw + col];
+                if alpha > 0 {
+                    let px = gx + col as f32;
+                    let py = gy + row as f32;
+                    if let Some(rect) = tiny_skia::Rect::from_xywh(px, py, 1.0, 1.0) {
+                        let mut char_paint = paint.clone();
+                        char_paint.set_color(Color::from_rgba8(255, 255, 255, alpha));
+                        pixmap.fill_rect(rect, &char_paint, Transform::identity(), None);
                     }
                 }
             }
         }
-        cx += 6.0 * scale;
-    }
-}
-
-/// Simple 5x7 bitmap patterns for ASCII characters.
-fn char_pattern(ch: char) -> [u8; 7] {
-    match ch {
-        '0' => [0x3E, 0x51, 0x49, 0x45, 0x3E, 0x00, 0x00],
-        '1' => [0x00, 0x42, 0x7F, 0x40, 0x00, 0x00, 0x00],
-        '2' => [0x42, 0x61, 0x51, 0x49, 0x46, 0x00, 0x00],
-        '3' => [0x21, 0x41, 0x45, 0x4B, 0x31, 0x00, 0x00],
-        '4' => [0x18, 0x14, 0x12, 0x7F, 0x10, 0x00, 0x00],
-        '5' => [0x27, 0x45, 0x45, 0x45, 0x39, 0x00, 0x00],
-        '6' => [0x3C, 0x4A, 0x49, 0x49, 0x30, 0x00, 0x00],
-        '7' => [0x01, 0x71, 0x09, 0x05, 0x03, 0x00, 0x00],
-        '8' => [0x36, 0x49, 0x49, 0x49, 0x36, 0x00, 0x00],
-        '9' => [0x06, 0x49, 0x49, 0x29, 0x1E, 0x00, 0x00],
-        'E' => [0x7F, 0x49, 0x49, 0x49, 0x41, 0x00, 0x00],
-        's' => [0x32, 0x49, 0x49, 0x49, 0x26, 0x00, 0x00],
-        'c' => [0x1E, 0x21, 0x21, 0x21, 0x12, 0x00, 0x00],
-        'a' => [0x20, 0x54, 0x54, 0x54, 0x78, 0x00, 0x00],
-        'n' => [0x7C, 0x08, 0x04, 0x04, 0x78, 0x00, 0x00],
-        'l' => [0x00, 0x41, 0x7F, 0x40, 0x00, 0x00, 0x00],
-        'D' => [0x7F, 0x41, 0x41, 0x22, 0x1C, 0x00, 0x00],
-        'r' => [0x7C, 0x08, 0x04, 0x04, 0x08, 0x00, 0x00],
-        'g' => [0x3E, 0x41, 0x49, 0x49, 0x7A, 0x00, 0x00],
-        't' => [0x04, 0x3F, 0x44, 0x40, 0x20, 0x00, 0x00],
-        'o' => [0x1C, 0x22, 0x41, 0x41, 0x22, 0x00, 0x00],
-        ' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-        '|' => [0x00, 0x00, 0x7F, 0x00, 0x00, 0x00, 0x00],
-        '-' => [0x08, 0x08, 0x08, 0x08, 0x08, 0x00, 0x00],
-        'x' => [0x44, 0x2A, 0x11, 0x2A, 0x44, 0x00, 0x00],
-        _ => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        cx += metrics.advance_width;
     }
 }
 
@@ -525,7 +615,7 @@ impl PointerHandler for LayerSelector {
             match event.kind {
                 Enter { .. } | Motion { .. } => {
                     self.drag_current = event.position;
-                    if self.drag_start.is_some() {
+                    if self.drag_start.is_some() && self.should_redraw() {
                         self.draw(qh);
                     }
                 }
