@@ -25,7 +25,7 @@ use smithay_client_toolkit::{
         },
         WaylandSurface,
     },
-    shm::{slot::{Slot, SlotPool}, Shm, ShmHandler},
+    shm::{slot::SlotPool, Shm, ShmHandler},
 };
 use wayland_client::{
     globals::registry_queue_init,
@@ -67,14 +67,6 @@ pub struct LayerSelector {
     /// Exit flags.
     exit: bool,
     cancelled: bool,
-
-    /// Throttle redraws: only redraw when the mouse has moved at least this many pixels.
-    last_drawn_pos: Option<(f64, f64)>,
-
-    // Double-buffered slots to avoid page-faults on every draw.
-    slot_a: Option<Slot>,
-    slot_b: Option<Slot>,
-    use_slot_b: bool,
 }
 
 impl LayerSelector {
@@ -120,10 +112,6 @@ impl LayerSelector {
             selected_region: None,
             exit: false,
             cancelled: false,
-            last_drawn_pos: None,
-            slot_a: None,
-            slot_b: None,
-            use_slot_b: false,
         };
 
         while !selector.exit {
@@ -142,106 +130,18 @@ impl LayerSelector {
         let stride = width as i32 * 4;
         let buf_size = (stride * height as i32) as usize;
 
-        // Pick the next slot, falling back to the other if it is still active.
-        let (slot_ref, next_use_b) = if self.use_slot_b {
-            if let Some(ref slot) = self.slot_b {
-                if !slot.has_active_buffers() {
-                    (slot, false)
-                } else if let Some(ref slot_a) = self.slot_a {
-                    (slot_a, false)
-                } else {
-                    return;
-                }
-            } else if let Some(ref slot_a) = self.slot_a {
-                (slot_a, false)
-            } else {
-                return;
-            }
-        } else {
-            if let Some(ref slot) = self.slot_a {
-                if !slot.has_active_buffers() {
-                    (slot, true)
-                } else if let Some(ref slot_b) = self.slot_b {
-                    (slot_b, true)
-                } else {
-                    return;
-                }
-            } else if let Some(ref slot_b) = self.slot_b {
-                (slot_b, true)
-            } else {
-                return;
-            }
-        };
-        self.use_slot_b = next_use_b;
+        // Resize pool if needed.
+        if self.pool.len() < buf_size {
+            let _ = self.pool.resize(buf_size);
+        }
 
-        let buffer = self
+        let (buffer, canvas) = self
             .pool
-            .create_buffer_in(slot_ref, width as i32, height as i32, stride, wl_shm::Format::Argb8888)
-            .expect("create buffer in slot");
-        let canvas = self.pool.raw_data_mut(slot_ref);
+            .create_buffer(width as i32, height as i32, stride, wl_shm::Format::Argb8888)
+            .expect("create buffer");
 
-        // Fill entire screen with mask.
-        let mask_bytes = MASK_COLOR.to_le_bytes();
-        for chunk in canvas[..buf_size].chunks_exact_mut(4) {
-            chunk.copy_from_slice(&mask_bytes);
-        }
-
-        // Draw selection highlight if dragging.
-        if let Some(start) = self.drag_start {
-            let x1 = start.0.min(self.drag_current.0);
-            let y1 = start.1.min(self.drag_current.1);
-            let x2 = start.0.max(self.drag_current.0);
-            let y2 = start.1.max(self.drag_current.1);
-
-            let x1_i = x1 as i32;
-            let y1_i = y1 as i32;
-            let x2_i = x2 as i32;
-            let y2_i = y2 as i32;
-
-            // Fill highlight inside selection.
-            let highlight_bytes = HIGHLIGHT_COLOR.to_le_bytes();
-            for y in y1_i..y2_i {
-                if y < 0 || y >= height as i32 {
-                    continue;
-                }
-                let row_offset = (y * stride) as usize;
-                for x in x1_i..x2_i {
-                    if x < 0 || x >= width as i32 {
-                        continue;
-                    }
-                    let offset = row_offset + (x as usize) * 4;
-                    canvas[offset..offset + 4].copy_from_slice(&highlight_bytes);
-                }
-            }
-
-            // Draw border.
-            draw_rect_border(
-                canvas,
-                width,
-                height,
-                Rect {
-                    x1: x1_i,
-                    y1: y1_i,
-                    x2: x2_i,
-                    y2: y2_i,
-                },
-                BORDER_COLOR,
-            );
-
-            // Draw size label near bottom-right of selection.
-            let w = (x2 - x1) as i32;
-            let h = (y2 - y1) as i32;
-            let label = format!("{}x{}", w, h);
-            let label_x = (x2_i - label.len() as i32 * 8).max(4);
-            let label_y = (y2_i - 16).max(4);
-            draw_text(canvas, width, height, label_x, label_y, &label, TEXT_COLOR);
-        }
-
-        // Draw hint text at bottom center.
-        let hint = "Esc cancel | Drag to select";
-        let hint_x = (width as i32 - hint.len() as i32 * 8) / 2;
-        let hint_y = height as i32 - 30;
-        draw_text(canvas, width, height, hint_x, hint_y, &hint, TEXT_COLOR);
+        // Use tiny-skia to render the overlay.
+        render_selector(canvas, width, height, self.drag_start, self.drag_current);
 
         // Damage entire surface and present.
         self.layer
@@ -254,100 +154,141 @@ impl LayerSelector {
 }
 
 // ---------------------------------------------------------------------------
-// Simple software rendering helpers
+// tiny-skia rendering
 // ---------------------------------------------------------------------------
 
-/// Rectangle for border drawing.
-struct Rect {
-    x1: i32,
-    y1: i32,
-    x2: i32,
-    y2: i32,
-}
+/// Render the selector UI using tiny-skia.
+fn render_selector(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    drag_start: Option<(f64, f64)>,
+    drag_current: (f64, f64),
+) {
+    use tiny_skia::{Color, Paint, Pixmap, Transform};
 
-/// Draw a 1-pixel border around a rectangle.
-fn draw_rect_border(canvas: &mut [u8], width: u32, height: u32, rect: Rect, color: u32) {
-    let stride = width as i32 * 4;
-    let color_bytes = color.to_le_bytes();
+    let mut pixmap = Pixmap::new(width, height).expect("pixmap");
+    pixmap.fill(Color::from_rgba8(0, 0, 0, 128));
 
-    for x in rect.x1..rect.x2 {
-        set_pixel(canvas, stride, height, x, rect.y1, color_bytes);
-        set_pixel(canvas, stride, height, x, rect.y2 - 1, color_bytes);
-    }
-    for y in rect.y1..rect.y2 {
-        set_pixel(canvas, stride, height, rect.x1, y, color_bytes);
-        set_pixel(canvas, stride, height, rect.x2 - 1, y, color_bytes);
-    }
-}
+    if let Some(start) = drag_start {
+        let x1 = start.0.min(drag_current.0) as f32;
+        let y1 = start.1.min(drag_current.1) as f32;
+        let x2 = start.0.max(drag_current.0) as f32;
+        let y2 = start.1.max(drag_current.1) as f32;
 
-/// Set a single pixel (clamped to bounds).
-fn set_pixel(canvas: &mut [u8], stride: i32, height: u32, x: i32, y: i32, color: [u8; 4]) {
-    if x < 0 || y < 0 || x >= stride / 4 || y >= height as i32 {
-        return;
-    }
-    let offset = (y * stride + x * 4) as usize;
-    canvas[offset..offset + 4].copy_from_slice(&color);
-}
+        let sel_rect = tiny_skia::Rect::from_ltrb(x1, y1, x2, y2);
+        if let Some(rect) = sel_rect {
+            // Highlight fill
+            let mut paint = Paint::default();
+            paint.set_color(Color::from_rgba8(255, 255, 255, 64));
+            pixmap.fill_rect(rect, &paint, Transform::identity(), None);
 
-/// Draw simple 8x8 pixel text (ASCII only).
-fn draw_text(canvas: &mut [u8], width: u32, height: u32, x: i32, y: i32, text: &str, color: u32) {
-    let stride = width as i32 * 4;
-    let color_bytes = color.to_le_bytes();
-    let mut cx = x;
-    for ch in text.chars() {
-        if cx + 8 >= width as i32 {
-            break;
+            // White border (1px)
+            let mut border_paint = Paint::default();
+            border_paint.set_color(Color::from_rgba8(255, 255, 255, 255));
+            border_paint.anti_alias = false;
+
+            // Top
+            if let Some(top) = tiny_skia::Rect::from_ltrb(x1, y1, x2, y1 + 1.0) {
+                pixmap.fill_rect(top, &border_paint, Transform::identity(), None);
+            }
+            // Bottom
+            if let Some(bottom) = tiny_skia::Rect::from_ltrb(x1, y2 - 1.0, x2, y2) {
+                pixmap.fill_rect(bottom, &border_paint, Transform::identity(), None);
+            }
+            // Left
+            if let Some(left) = tiny_skia::Rect::from_ltrb(x1, y1, x1 + 1.0, y2) {
+                pixmap.fill_rect(left, &border_paint, Transform::identity(), None);
+            }
+            // Right
+            if let Some(right) = tiny_skia::Rect::from_ltrb(x2 - 1.0, y1, x2, y2) {
+                pixmap.fill_rect(right, &border_paint, Transform::identity(), None);
+            }
+
+            // Size label
+            let w = (x2 - x1) as i32;
+            let h = (y2 - y1) as i32;
+            let label = format!("{}x{}", w, h);
+            draw_label(&mut pixmap, x2 - 4.0, y2 - 4.0, &label);
         }
-        draw_char(canvas, stride, height, cx, y, ch, color_bytes);
-        cx += 8;
+    }
+
+    // Hint text
+    draw_label(&mut pixmap, width as f32 / 2.0, height as f32 - 30.0, "Esc cancel | Drag to select");
+
+    // Copy from pixmap (RGBA) to canvas (ARGB/BGRA for Wayland)
+    let data = pixmap.data();
+    for y in 0..height {
+        for x in 0..width {
+            let src = ((y * width + x) * 4) as usize;
+            let dst = ((y * width + x) * 4) as usize;
+            // RGBA -> BGRA (Wayland ARGB8888 is actually BGRA in memory)
+            canvas[dst] = data[src + 2];     // B
+            canvas[dst + 1] = data[src + 1]; // G
+            canvas[dst + 2] = data[src];     // R
+            canvas[dst + 3] = data[src + 3]; // A
+        }
     }
 }
 
-/// Draw a single character using a simple bitmap font.
-fn draw_char(canvas: &mut [u8], stride: i32, height: u32, x: i32, y: i32, ch: char, color: [u8; 4]) {
-    // Simple 8x8 bitmap patterns for digits and common chars.
-    let pattern = char_pattern(ch);
-    for (row, &pattern_byte) in pattern.iter().enumerate() {
-        for col in 0..8 {
-            if (pattern_byte >> (7 - col)) & 1 != 0 {
-                set_pixel(canvas, stride, height, x + col, y + row as i32, color);
+/// Draw a simple text label using tiny-skia (basic pixel font).
+fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
+    use tiny_skia::{Color, Paint, Transform};
+
+    let mut paint = Paint::default();
+    paint.set_color(Color::from_rgba8(255, 255, 255, 255));
+    paint.anti_alias = false;
+
+    let scale = 2.0;
+    let mut cx = x - (text.len() as f32 * 5.0 * scale) / 2.0;
+    let cy = y;
+
+    for ch in text.chars() {
+        let pattern = char_pattern(ch);
+        for (row, &bits) in pattern.iter().enumerate() {
+            for col in 0..5u32 {
+                if (bits >> (4 - col)) & 1 != 0 {
+                    let px = cx + col as f32 * scale;
+                    let py = cy + row as f32 * scale;
+                    if let Some(rect) = tiny_skia::Rect::from_xywh(px, py, scale, scale) {
+                        pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+                    }
+                }
             }
         }
+        cx += 6.0 * scale;
     }
 }
 
-/// Return an 8x8 bitmap pattern for a character.
-fn char_pattern(ch: char) -> [u8; 8] {
+/// Simple 5x7 bitmap patterns for ASCII characters.
+fn char_pattern(ch: char) -> [u8; 7] {
     match ch {
-        '0' => [0x3C, 0x66, 0x6E, 0x76, 0x66, 0x66, 0x3C, 0x00],
-        '1' => [0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7E, 0x00],
-        '2' => [0x3C, 0x66, 0x06, 0x0C, 0x30, 0x60, 0x7E, 0x00],
-        '3' => [0x3C, 0x66, 0x06, 0x1C, 0x06, 0x66, 0x3C, 0x00],
-        '4' => [0x06, 0x0E, 0x1E, 0x66, 0x7F, 0x06, 0x06, 0x00],
-        '5' => [0x7E, 0x60, 0x7C, 0x06, 0x06, 0x66, 0x3C, 0x00],
-        '6' => [0x3C, 0x66, 0x60, 0x7C, 0x66, 0x66, 0x3C, 0x00],
-        '7' => [0x7E, 0x06, 0x0C, 0x18, 0x30, 0x30, 0x30, 0x00],
-        '8' => [0x3C, 0x66, 0x66, 0x3C, 0x66, 0x66, 0x3C, 0x00],
-        '9' => [0x3C, 0x66, 0x66, 0x3E, 0x06, 0x66, 0x3C, 0x00],
-        'x' => [0x00, 0x66, 0x3C, 0x18, 0x3C, 0x66, 0x00, 0x00],
-        ' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-        '|' => [0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00],
-        'c' => [0x00, 0x3C, 0x66, 0x60, 0x60, 0x66, 0x3C, 0x00],
-        'a' => [0x00, 0x3C, 0x06, 0x3E, 0x66, 0x66, 0x3E, 0x00],
-        'n' => [0x00, 0x7C, 0x66, 0x66, 0x66, 0x66, 0x66, 0x00],
-        'e' => [0x00, 0x3C, 0x66, 0x7E, 0x60, 0x66, 0x3C, 0x00],
-        'l' => [0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x7E, 0x00],
-        'D' => [0x7C, 0x66, 0x66, 0x66, 0x66, 0x66, 0x7C, 0x00],
-        'g' => [0x00, 0x3C, 0x66, 0x66, 0x3E, 0x06, 0x3C, 0x00],
-        't' => [0x18, 0x18, 0x7E, 0x18, 0x18, 0x18, 0x0E, 0x00],
-        'o' => [0x00, 0x3C, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x00],
-        's' => [0x00, 0x3E, 0x60, 0x3C, 0x06, 0x06, 0x7C, 0x00],
-        'r' => [0x00, 0x7C, 0x66, 0x60, 0x60, 0x60, 0x60, 0x00],
-        'd' => [0x00, 0x3E, 0x66, 0x66, 0x66, 0x66, 0x3E, 0x00],
-        'S' => [0x3E, 0x60, 0x60, 0x3C, 0x06, 0x06, 0x7C, 0x00],
-        'C' => [0x3C, 0x66, 0x60, 0x60, 0x60, 0x66, 0x3C, 0x00],
-        '-' => [0x00, 0x00, 0x00, 0x7E, 0x00, 0x00, 0x00, 0x00],
-        _ => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        '0' => [0x3E, 0x51, 0x49, 0x45, 0x3E, 0x00, 0x00],
+        '1' => [0x00, 0x42, 0x7F, 0x40, 0x00, 0x00, 0x00],
+        '2' => [0x42, 0x61, 0x51, 0x49, 0x46, 0x00, 0x00],
+        '3' => [0x21, 0x41, 0x45, 0x4B, 0x31, 0x00, 0x00],
+        '4' => [0x18, 0x14, 0x12, 0x7F, 0x10, 0x00, 0x00],
+        '5' => [0x27, 0x45, 0x45, 0x45, 0x39, 0x00, 0x00],
+        '6' => [0x3C, 0x4A, 0x49, 0x49, 0x30, 0x00, 0x00],
+        '7' => [0x01, 0x71, 0x09, 0x05, 0x03, 0x00, 0x00],
+        '8' => [0x36, 0x49, 0x49, 0x49, 0x36, 0x00, 0x00],
+        '9' => [0x06, 0x49, 0x49, 0x29, 0x1E, 0x00, 0x00],
+        'E' => [0x7F, 0x49, 0x49, 0x49, 0x41, 0x00, 0x00],
+        's' => [0x32, 0x49, 0x49, 0x49, 0x26, 0x00, 0x00],
+        'c' => [0x1E, 0x21, 0x21, 0x21, 0x12, 0x00, 0x00],
+        'a' => [0x20, 0x54, 0x54, 0x54, 0x78, 0x00, 0x00],
+        'n' => [0x7C, 0x08, 0x04, 0x04, 0x78, 0x00, 0x00],
+        'l' => [0x00, 0x41, 0x7F, 0x40, 0x00, 0x00, 0x00],
+        'D' => [0x7F, 0x41, 0x41, 0x22, 0x1C, 0x00, 0x00],
+        'r' => [0x7C, 0x08, 0x04, 0x04, 0x08, 0x00, 0x00],
+        'g' => [0x3E, 0x41, 0x49, 0x49, 0x7A, 0x00, 0x00],
+        't' => [0x04, 0x3F, 0x44, 0x40, 0x20, 0x00, 0x00],
+        'o' => [0x1C, 0x22, 0x41, 0x41, 0x22, 0x00, 0x00],
+        ' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        '|' => [0x00, 0x00, 0x7F, 0x00, 0x00, 0x00, 0x00],
+        '-' => [0x08, 0x08, 0x08, 0x08, 0x08, 0x00, 0x00],
+        'x' => [0x44, 0x2A, 0x11, 0x2A, 0x44, 0x00, 0x00],
+        _ => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
     }
 }
 
@@ -450,30 +391,6 @@ impl LayerShellHandler for LayerSelector {
     ) {
         self.width = NonZeroU32::new(configure.new_size.0).map_or(256, NonZeroU32::get);
         self.height = NonZeroU32::new(configure.new_size.1).map_or(256, NonZeroU32::get);
-
-        // Pre-allocate and warm-up double-buffered slots to avoid page-faults on every draw.
-        let stride = self.width as i32 * 4;
-        let buf_size = (stride * self.height as i32) as usize;
-        if self.pool.len() < buf_size * 2 {
-            let _ = self.pool.resize(buf_size * 2);
-        }
-        if self.slot_a.is_none() {
-            if let Ok(slot) = self.pool.new_slot(buf_size) {
-                if let Some(data) = self.pool.raw_data_mut(&slot).get_mut(..buf_size) {
-                    data.fill(0x00);
-                }
-                self.slot_a = Some(slot);
-            }
-        }
-        if self.slot_b.is_none() {
-            if let Ok(slot) = self.pool.new_slot(buf_size) {
-                if let Some(data) = self.pool.raw_data_mut(&slot).get_mut(..buf_size) {
-                    data.fill(0x00);
-                }
-                self.slot_b = Some(slot);
-            }
-        }
-
         self.draw(qh);
     }
 }
