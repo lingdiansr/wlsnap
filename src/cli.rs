@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, ValueEnum};
+use clap::{Args, Parser};
 
 #[derive(Debug, Parser)]
 #[command(name = "wlsnap")]
@@ -8,10 +8,6 @@ use clap::{Args, Parser, ValueEnum};
 pub struct Cli {
     #[command(flatten)]
     pub mode: CaptureMode,
-
-    /// Action to perform after capture
-    #[arg(short, long, value_name = "ACTION")]
-    pub post: Option<PostCaptureAction>,
 
     /// Output the image to stdout as PNG
     #[arg(long)]
@@ -26,12 +22,8 @@ pub struct Cli {
     pub exec: Option<String>,
 
     /// Copy the image to the clipboard
-    #[arg(long)]
+    #[arg(short, long)]
     pub clipboard: bool,
-
-    /// Save without printing the file path to stdout
-    #[arg(long)]
-    pub silent: bool,
 
     /// Include the cursor in the screenshot
     #[arg(long)]
@@ -44,33 +36,27 @@ pub struct Cli {
     /// Print available Wayland protocols and exit
     #[arg(long)]
     pub debug_protocol: bool,
-
-    /// Path to a custom configuration file
-    #[arg(short, long, value_name = "PATH")]
-    pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, Args, Clone)]
 #[group(required = false, multiple = false)]
 pub struct CaptureMode {
     /// Capture the entire current screen
-    #[arg(long)]
+    #[arg(long, visible_alias = "full")]
     pub screen: bool,
 
     /// Capture all screens and stitch them into one image
-    #[arg(long)]
-    pub screen_all: bool,
+    #[arg(short, long, visible_alias = "full-all")]
+    pub all_screen: bool,
 
     /// Capture a region. Without value: interactive selection.
     /// With value: direct crop using "x,y,w,h" coordinates.
-    #[arg(long, value_name = "X,Y,W,H", num_args = 0..=1, default_missing_value = "")]
-    pub area: Option<String>,
+    #[arg(short, long, value_name = "X,Y,W,H", num_args = 0..=1, default_missing_value = "")]
+    pub range: Option<String>,
 
     /// Capture a specific window (interactive, requires GUI)
     #[arg(long)]
     pub window: bool,
-
-
 
     /// Pin the captured image as a floating window (requires GUI)
     #[arg(long, value_name = "PATH")]
@@ -89,10 +75,10 @@ impl CaptureMode {
     pub fn selected_mode_name(&self) -> &'static str {
         if self.screen {
             "screen"
-        } else if self.screen_all {
-            "screen_all"
-        } else if self.area.is_some() {
-            "area"
+        } else if self.all_screen {
+            "all_screen"
+        } else if self.range.is_some() {
+            "range"
         } else if self.window {
             "window"
         } else if self.pin.is_some() {
@@ -107,20 +93,6 @@ impl CaptureMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum PostCaptureAction {
-    /// Open the image in the built-in editor (requires GUI)
-    Edit,
-    /// Save the image to disk
-    Save,
-    /// Copy the image to the clipboard
-    Clipboard,
-    /// Output the image to stdout as PNG
-    Pipe,
-    /// Ask what to do with the image (requires GUI)
-    Ask,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,35 +101,56 @@ mod tests {
     fn parse_screen_flag() {
         let cli = Cli::try_parse_from(["wlsnap", "--screen"]).unwrap();
         assert!(cli.mode.screen);
-        assert!(cli.mode.area.is_none());
+        assert!(cli.mode.range.is_none());
         assert_eq!(cli.mode.selected_mode_name(), "screen");
     }
 
     #[test]
-    fn parse_area_and_stdout() {
-        let cli = Cli::try_parse_from(["wlsnap", "--area", "--stdout"]).unwrap();
-        // --area without value gives Some("") in clap
-        assert!(cli.mode.area.is_some());
+    fn parse_full_alias() {
+        let cli = Cli::try_parse_from(["wlsnap", "--full"]).unwrap();
+        assert!(cli.mode.screen);
+        assert_eq!(cli.mode.selected_mode_name(), "screen");
+    }
+
+    #[test]
+    fn parse_range_and_stdout() {
+        let cli = Cli::try_parse_from(["wlsnap", "--range", "--stdout"]).unwrap();
+        // --range without value gives Some("") in clap
+        assert!(cli.mode.range.is_some());
         assert!(cli.stdout);
-        assert_eq!(cli.mode.selected_mode_name(), "area");
+        assert_eq!(cli.mode.selected_mode_name(), "range");
     }
 
     #[test]
-    fn parse_area_with_coords() {
-        let cli = Cli::try_parse_from(["wlsnap", "--area", "100,200,500,400"]).unwrap();
-        assert_eq!(cli.mode.area, Some("100,200,500,400".into()));
-        assert_eq!(cli.mode.selected_mode_name(), "area");
+    fn parse_range_short() {
+        let cli = Cli::try_parse_from(["wlsnap", "-r", "100,200,500,400"]).unwrap();
+        assert_eq!(cli.mode.range, Some("100,200,500,400".into()));
+        assert_eq!(cli.mode.selected_mode_name(), "range");
     }
 
     #[test]
-    fn parse_post_edit() {
-        let cli = Cli::try_parse_from(["wlsnap", "--post", "edit"]).unwrap();
-        assert_eq!(cli.post, Some(PostCaptureAction::Edit));
+    fn parse_all_screen() {
+        let cli = Cli::try_parse_from(["wlsnap", "--all-screen"]).unwrap();
+        assert!(cli.mode.all_screen);
+        assert_eq!(cli.mode.selected_mode_name(), "all_screen");
+    }
+
+    #[test]
+    fn parse_all_screen_short() {
+        let cli = Cli::try_parse_from(["wlsnap", "-a"]).unwrap();
+        assert!(cli.mode.all_screen);
+        assert_eq!(cli.mode.selected_mode_name(), "all_screen");
+    }
+
+    #[test]
+    fn parse_clipboard_short() {
+        let cli = Cli::try_parse_from(["wlsnap", "-c"]).unwrap();
+        assert!(cli.clipboard);
     }
 
     #[test]
     fn conflicting_modes_rejected() {
-        let result = Cli::try_parse_from(["wlsnap", "--screen", "--area"]);
+        let result = Cli::try_parse_from(["wlsnap", "--screen", "--range"]);
         assert!(result.is_err());
     }
 

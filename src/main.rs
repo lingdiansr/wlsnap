@@ -63,8 +63,8 @@ fn main() -> eframe::Result {
         }
     }
 
-    // 6. Interactive --area without coordinates: run selector (layer-shell or eframe fallback)
-    if cli.mode.area.as_ref().is_some_and(|s| s.is_empty()) {
+    // 6. Interactive --range without coordinates: run selector (layer-shell or eframe fallback)
+    if cli.mode.range.as_ref().is_some_and(|s| s.is_empty()) {
         let probe = wlsnap::backend::probe_all();
         let region = if probe.has_layer_shell() {
             wlsnap::ui::layer_selector::LayerSelector::run()
@@ -75,7 +75,7 @@ fn main() -> eframe::Result {
         match region {
             Some(region) => {
                 let mut cli = cli;
-                cli.mode.area = Some(format!(
+                cli.mode.range = Some(format!(
                     "{},{},{},{}",
                     region.min.x.round() as i64,
                     region.min.y.round() as i64,
@@ -94,7 +94,7 @@ fn main() -> eframe::Result {
                 }
             }
             None => {
-                tracing::info!("Area selection cancelled.");
+                tracing::info!("Range selection cancelled.");
                 return Ok(());
             }
         }

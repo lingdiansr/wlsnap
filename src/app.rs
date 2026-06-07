@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use wlsnap::capture::CapturedImage;
-use wlsnap::cli::{Cli, PostCaptureAction};
+use wlsnap::cli::Cli;
 use wlsnap::config::Config;
 use wlsnap::output_manager::{OutputAction, dispatch};
 
@@ -91,9 +91,8 @@ impl WlsnapApp {
     /// 1. `--stdout`  → Pipe
     /// 2. `--exec CMD` → Exec(cmd)
     /// 3. `--clipboard` → Clipboard
-    /// 4. `-o PATH` / `--silent` → Save
-    /// 5. `--post ACTION` → override config
-    /// 6. `general.post_capture` config → default action
+    /// 4. `-o PATH` → Save(Some(path))
+    /// 5. `general.post_capture` config → default action
     fn determine_output_action(&self) -> OutputAction {
         let cli = self
             .cli
@@ -112,28 +111,8 @@ impl WlsnapApp {
         if let Some(ref path) = cli.output {
             return OutputAction::Save(Some(path.clone()));
         }
-        if cli.silent {
-            return OutputAction::Save(None);
-        }
-        if let Some(post) = cli.post {
-            return Self::post_action_to_output_action(post);
-        }
 
         Self::parse_post_capture_config(&self.config.general.post_capture)
-    }
-
-    /// Map a CLI `PostCaptureAction` to an `OutputAction`.
-    ///
-    /// For v0.1.0, `Edit` and `Ask` are mapped to `Save` because there is no
-    /// GUI editor yet.
-    fn post_action_to_output_action(action: PostCaptureAction) -> OutputAction {
-        match action {
-            PostCaptureAction::Edit => OutputAction::Save(None),
-            PostCaptureAction::Save => OutputAction::Save(None),
-            PostCaptureAction::Clipboard => OutputAction::Clipboard,
-            PostCaptureAction::Pipe => OutputAction::Pipe,
-            PostCaptureAction::Ask => OutputAction::Save(None),
-        }
     }
 
     /// Parse the `general.post_capture` config string into an `OutputAction`.
@@ -158,10 +137,10 @@ impl WlsnapApp {
         let mode_name = cli.mode.selected_mode_name().to_string();
 
         self._runtime.spawn(async move {
-            let result = if cli.mode.screen_all {
+            let result = if cli.mode.all_screen {
                 wlsnap::capture::output::capture_all_screens(overlay_cursor).await
             } else {
-                // --full, --screen, --area, --window, or default (no mode) all
+                // --screen, --range, --window, or default (no mode) all
                 // map to capturing the current screen for v0.1.0.
                 wlsnap::capture::output::capture_current_screen(overlay_cursor).await
             };
@@ -269,23 +248,20 @@ mod tests {
         Cli {
             mode: wlsnap::cli::CaptureMode {
                 screen: true,
-                screen_all: false,
-                area: None,
+                all_screen: false,
+                range: None,
                 window: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
             },
-            post: None,
             stdout: true,
             output: None,
             exec: None,
             clipboard: false,
-            silent: false,
             cursor: false,
             list_outputs: false,
             debug_protocol: false,
-            config: None,
         }
     }
 
@@ -293,23 +269,20 @@ mod tests {
         Cli {
             mode: wlsnap::cli::CaptureMode {
                 screen: true,
-                screen_all: false,
-                area: None,
+                all_screen: false,
+                range: None,
                 window: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
             },
-            post: None,
             stdout: false,
             output: None,
             exec: Some(cmd.into()),
             clipboard: false,
-            silent: false,
             cursor: false,
             list_outputs: false,
             debug_protocol: false,
-            config: None,
         }
     }
 
@@ -317,23 +290,20 @@ mod tests {
         Cli {
             mode: wlsnap::cli::CaptureMode {
                 screen: true,
-                screen_all: false,
-                area: None,
+                all_screen: false,
+                range: None,
                 window: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
             },
-            post: None,
             stdout: false,
             output: None,
             exec: None,
             clipboard: true,
-            silent: false,
             cursor: false,
             list_outputs: false,
             debug_protocol: false,
-            config: None,
         }
     }
 
@@ -341,71 +311,20 @@ mod tests {
         Cli {
             mode: wlsnap::cli::CaptureMode {
                 screen: true,
-                screen_all: false,
-                area: None,
+                all_screen: false,
+                range: None,
                 window: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
             },
-            post: None,
             stdout: false,
             output: Some(path),
             exec: None,
             clipboard: false,
-            silent: false,
             cursor: false,
             list_outputs: false,
             debug_protocol: false,
-            config: None,
-        }
-    }
-
-    fn make_cli_with_silent() -> Cli {
-        Cli {
-            mode: wlsnap::cli::CaptureMode {
-                screen: true,
-                screen_all: false,
-                area: None,
-                window: false,
-                pin: None,
-                scroll_auto: false,
-                scroll_manual: false,
-            },
-            post: None,
-            stdout: false,
-            output: None,
-            exec: None,
-            clipboard: false,
-            silent: true,
-            cursor: false,
-            list_outputs: false,
-            debug_protocol: false,
-            config: None,
-        }
-    }
-
-    fn make_cli_with_post(post: PostCaptureAction) -> Cli {
-        Cli {
-            mode: wlsnap::cli::CaptureMode {
-                screen: true,
-                screen_all: false,
-                area: None,
-                window: false,
-                pin: None,
-                scroll_auto: false,
-                scroll_manual: false,
-            },
-            post: Some(post),
-            stdout: false,
-            output: None,
-            exec: None,
-            clipboard: false,
-            silent: false,
-            cursor: false,
-            list_outputs: false,
-            debug_protocol: false,
-            config: None,
         }
     }
 
@@ -514,11 +433,10 @@ mod tests {
     #[test]
     fn test_determine_output_action_clipboard_wins_over_save() {
         let mut cli = make_cli_with_clipboard();
-        cli.silent = true;
         let app = make_app_with_cli(cli);
         assert!(
             matches!(app.determine_output_action(), OutputAction::Clipboard),
-            "clipboard should win over silent"
+            "clipboard should win over default save"
         );
     }
 
@@ -527,43 +445,6 @@ mod tests {
         let cli = make_cli_with_output(PathBuf::from("/tmp/test.png"));
         let app = make_app_with_cli(cli);
         assert!(matches!(app.determine_output_action(), OutputAction::Save(_)));
-    }
-
-    #[test]
-    fn test_determine_output_action_silent_maps_to_save() {
-        let cli = make_cli_with_silent();
-        let app = make_app_with_cli(cli);
-        assert!(matches!(app.determine_output_action(), OutputAction::Save(_)));
-    }
-
-    #[test]
-    fn test_determine_output_action_post_override() {
-        let cli = make_cli_with_post(PostCaptureAction::Clipboard);
-        let app = make_app_with_cli(cli);
-        assert!(
-            matches!(app.determine_output_action(), OutputAction::Clipboard),
-            "--post clipboard should map to Clipboard"
-        );
-    }
-
-    #[test]
-    fn test_determine_output_action_post_edit_maps_to_save_in_v010() {
-        let cli = make_cli_with_post(PostCaptureAction::Edit);
-        let app = make_app_with_cli(cli);
-        assert!(
-            matches!(app.determine_output_action(), OutputAction::Save(_)),
-            "Edit should map to Save in v0.1.0"
-        );
-    }
-
-    #[test]
-    fn test_determine_output_action_post_ask_maps_to_save_in_v010() {
-        let cli = make_cli_with_post(PostCaptureAction::Ask);
-        let app = make_app_with_cli(cli);
-        assert!(
-            matches!(app.determine_output_action(), OutputAction::Save(_)),
-            "Ask should map to Save in v0.1.0"
-        );
     }
 
     #[test]
@@ -600,44 +481,5 @@ mod tests {
         config.general.post_capture = "pipe".into();
         let app = make_app_with_config(cli, config);
         assert!(matches!(app.determine_output_action(), OutputAction::Pipe));
-    }
-
-    #[test]
-    fn test_determine_output_action_config_default_edit_maps_to_save() {
-        let cli = make_cli_with_stdout();
-        let mut cli = cli;
-        cli.stdout = false;
-        let mut config = Config::default();
-        config.general.post_capture = "edit".into();
-        let app = make_app_with_config(cli, config);
-        assert!(
-            matches!(app.determine_output_action(), OutputAction::Save(_)),
-            "config 'edit' should map to Save in v0.1.0"
-        );
-    }
-
-    #[test]
-    fn test_determine_output_action_config_default_unknown_maps_to_save() {
-        let cli = make_cli_with_stdout();
-        let mut cli = cli;
-        cli.stdout = false;
-        let mut config = Config::default();
-        config.general.post_capture = "foobar".into();
-        let app = make_app_with_config(cli, config);
-        assert!(
-            matches!(app.determine_output_action(), OutputAction::Save(_)),
-            "unknown config value should default to Save"
-        );
-    }
-
-    #[test]
-    fn test_determine_output_action_explicit_flags_beat_post() {
-        let mut cli = make_cli_with_post(PostCaptureAction::Save);
-        cli.stdout = true;
-        let app = make_app_with_cli(cli);
-        assert!(
-            matches!(app.determine_output_action(), OutputAction::Pipe),
-            "--stdout should beat --post save"
-        );
     }
 }

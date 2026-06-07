@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use crate::cli::{Cli, PostCaptureAction};
+use crate::cli::Cli;
 use crate::config::Config;
 use crate::error::Result;
 use crate::output_manager::{OutputAction, dispatch};
@@ -17,9 +17,7 @@ use crate::output_manager::{OutputAction, dispatch};
 /// 2. `--exec CMD` → Exec(cmd)
 /// 3. `--clipboard` → Clipboard
 /// 4. `-o PATH` → Save(Some(path))
-/// 5. `--silent` → Save(None)
-/// 6. `--post ACTION` → override
-/// 7. `general.post_capture` config → fallback
+/// 5. `general.post_capture` config → fallback
 pub fn determine_output_action(cli: &Cli, config: &Config) -> OutputAction {
     if cli.stdout {
         return OutputAction::Pipe;
@@ -33,28 +31,8 @@ pub fn determine_output_action(cli: &Cli, config: &Config) -> OutputAction {
     if let Some(ref path) = cli.output {
         return OutputAction::Save(Some(path.clone()));
     }
-    if cli.silent {
-        return OutputAction::Save(None);
-    }
-    if let Some(post) = cli.post {
-        return post_action_to_output_action(post);
-    }
 
     parse_post_capture_config(&config.general.post_capture)
-}
-
-/// Map a CLI `PostCaptureAction` to an `OutputAction`.
-///
-/// For v0.1.0, `Edit` and `Ask` are mapped to `Save(None)` because there is no
-/// GUI editor yet.
-fn post_action_to_output_action(action: PostCaptureAction) -> OutputAction {
-    match action {
-        PostCaptureAction::Edit => OutputAction::Save(None),
-        PostCaptureAction::Save => OutputAction::Save(None),
-        PostCaptureAction::Clipboard => OutputAction::Clipboard,
-        PostCaptureAction::Pipe => OutputAction::Pipe,
-        PostCaptureAction::Ask => OutputAction::Save(None),
-    }
 }
 
 /// Parse the `general.post_capture` config string into an `OutputAction`.
@@ -69,17 +47,10 @@ fn parse_post_capture_config(value: &str) -> OutputAction {
 
 /// Returns `true` if the selected CLI mode requires a GUI window.
 ///
-/// In v0.1.0 only `--post edit`, `--post ask`, and future modes
-/// (`--window`, `--pin`, `--scroll-auto`, `--scroll-manual`) need GUI.
-/// All capture modes (`--full`, `--screen`, `--full-all`, `--area`) return
-/// `false`.
+/// In v0.1.0 only future modes (`--window`, `--pin`, `--scroll-auto`,
+/// `--scroll-manual`) need GUI. All capture modes (`--screen`, `--all-screen`,
+/// `--range`) return `false`.
 pub fn needs_gui(cli: &Cli) -> bool {
-    if let Some(post) = cli.post
-        && matches!(post, PostCaptureAction::Edit | PostCaptureAction::Ask)
-    {
-        return true;
-    }
-
     if cli.mode.window {
         return true;
     }
@@ -93,8 +64,8 @@ pub fn needs_gui(cli: &Cli) -> bool {
         return true;
     }
 
-    // --area without coordinates needs interactive GUI selection
-    if cli.mode.area.as_ref().is_some_and(|s| s.is_empty()) {
+    // --range without coordinates needs interactive GUI selection
+    if cli.mode.range.as_ref().is_some_and(|s| s.is_empty()) {
         return true;
     }
 
@@ -113,15 +84,15 @@ pub fn run_cli_capture(cli: &Cli, config: &Config) -> Result<PathBuf> {
     let mode_name = cli.mode.selected_mode_name().to_string();
 
     let captured = rt.block_on(async {
-        if cli.mode.screen_all {
+        if cli.mode.all_screen {
             crate::capture::output::capture_all_screens(overlay_cursor).await
         } else {
             crate::capture::output::capture_current_screen(overlay_cursor).await
         }
     })?;
 
-    // If --area has coordinates, crop to the specified region.
-    let image = if let Some(ref coords) = cli.mode.area {
+    // If --range has coordinates, crop to the specified region.
+    let image = if let Some(ref coords) = cli.mode.range {
         if !coords.is_empty() {
             let region = crate::capture::region::parse_region_arg(coords)?;
             crate::capture::region::crop_image(&captured.image, &region, &captured.source_output)
@@ -145,23 +116,20 @@ mod tests {
         Cli {
             mode: crate::cli::CaptureMode {
                 screen: true,
-                screen_all: false,
-                area: None,
+                all_screen: false,
+                range: None,
                 window: false,
                 pin: None,
                 scroll_auto: false,
                 scroll_manual: false,
             },
-            post: None,
             stdout: false,
             output: None,
             exec: None,
             clipboard: false,
-            silent: false,
             cursor: false,
             list_outputs: false,
             debug_protocol: false,
-            config: None,
         }
     }
 
@@ -191,13 +159,6 @@ mod tests {
 
     fn make_cli_with_silent() -> Cli {
         let mut cli = make_cli_screen();
-        cli.silent = true;
-        cli
-    }
-
-    fn make_cli_with_post(post: PostCaptureAction) -> Cli {
-        let mut cli = make_cli_screen();
-        cli.post = Some(post);
         cli
     }
 
@@ -232,11 +193,10 @@ mod tests {
     #[test]
     fn test_clipboard_wins_over_save() {
         let mut cli = make_cli_with_clipboard();
-        cli.silent = true;
         let config = Config::default();
         assert!(
             matches!(determine_output_action(&cli, &config), OutputAction::Clipboard),
-            "clipboard should win over silent"
+            "clipboard should win over default save"
         );
     }
 
@@ -248,43 +208,6 @@ mod tests {
             OutputAction::Save(Some(p)) => assert_eq!(p, PathBuf::from("/tmp/test.png")),
             other => panic!("expected Save(Some), got {:?}", other),
         }
-    }
-
-    #[test]
-    fn test_silent_maps_to_save() {
-        let cli = make_cli_with_silent();
-        let config = Config::default();
-        assert!(matches!(determine_output_action(&cli, &config), OutputAction::Save(None)));
-    }
-
-    #[test]
-    fn test_post_override() {
-        let cli = make_cli_with_post(PostCaptureAction::Clipboard);
-        let config = Config::default();
-        assert!(
-            matches!(determine_output_action(&cli, &config), OutputAction::Clipboard),
-            "--post clipboard should map to Clipboard"
-        );
-    }
-
-    #[test]
-    fn test_post_edit_maps_to_save_in_v010() {
-        let cli = make_cli_with_post(PostCaptureAction::Edit);
-        let config = Config::default();
-        assert!(
-            matches!(determine_output_action(&cli, &config), OutputAction::Save(None)),
-            "Edit should map to Save in v0.1.0"
-        );
-    }
-
-    #[test]
-    fn test_post_ask_maps_to_save_in_v010() {
-        let cli = make_cli_with_post(PostCaptureAction::Ask);
-        let config = Config::default();
-        assert!(
-            matches!(determine_output_action(&cli, &config), OutputAction::Save(None)),
-            "Ask should map to Save in v0.1.0"
-        );
     }
 
     #[test]
@@ -308,37 +231,6 @@ mod tests {
         assert!(matches!(determine_output_action(&cli, &config), OutputAction::Pipe));
     }
 
-    #[test]
-    fn test_config_default_edit_maps_to_save() {
-        let cli = make_cli_screen();
-        let config = make_config_with_post_capture("edit");
-        assert!(
-            matches!(determine_output_action(&cli, &config), OutputAction::Save(None)),
-            "config 'edit' should map to Save in v0.1.0"
-        );
-    }
-
-    #[test]
-    fn test_config_default_unknown_maps_to_save() {
-        let cli = make_cli_screen();
-        let config = make_config_with_post_capture("foobar");
-        assert!(
-            matches!(determine_output_action(&cli, &config), OutputAction::Save(None)),
-            "unknown config value should default to Save"
-        );
-    }
-
-    #[test]
-    fn test_explicit_flags_beat_post() {
-        let mut cli = make_cli_with_post(PostCaptureAction::Save);
-        cli.stdout = true;
-        let config = Config::default();
-        assert!(
-            matches!(determine_output_action(&cli, &config), OutputAction::Pipe),
-            "--stdout should beat --post save"
-        );
-    }
-
     // ------------------------------------------------------------------
     // needs_gui tests
     // ------------------------------------------------------------------
@@ -350,56 +242,26 @@ mod tests {
     }
 
     #[test]
-    fn test_needs_gui_screen_all() {
+    fn test_needs_gui_all_screen() {
         let mut cli = make_cli_screen();
         cli.mode.screen = false;
-        cli.mode.screen_all = true;
+        cli.mode.all_screen = true;
         assert!(!needs_gui(&cli));
     }
 
     #[test]
-    fn test_needs_gui_area() {
+    fn test_needs_gui_range() {
         let mut cli = make_cli_screen();
         cli.mode.screen = false;
-        cli.mode.area = Some(String::new());
+        cli.mode.range = Some(String::new());
         assert!(needs_gui(&cli));
     }
 
     #[test]
-    fn test_needs_gui_area_with_coords() {
+    fn test_needs_gui_range_with_coords() {
         let mut cli = make_cli_screen();
         cli.mode.screen = false;
-        cli.mode.area = Some("100,200,500,400".into());
-        assert!(!needs_gui(&cli));
-    }
-
-    #[test]
-    fn test_needs_gui_post_edit() {
-        let cli = make_cli_with_post(PostCaptureAction::Edit);
-        assert!(needs_gui(&cli));
-    }
-
-    #[test]
-    fn test_needs_gui_post_ask() {
-        let cli = make_cli_with_post(PostCaptureAction::Ask);
-        assert!(needs_gui(&cli));
-    }
-
-    #[test]
-    fn test_needs_gui_post_save_false() {
-        let cli = make_cli_with_post(PostCaptureAction::Save);
-        assert!(!needs_gui(&cli));
-    }
-
-    #[test]
-    fn test_needs_gui_post_clipboard_false() {
-        let cli = make_cli_with_post(PostCaptureAction::Clipboard);
-        assert!(!needs_gui(&cli));
-    }
-
-    #[test]
-    fn test_needs_gui_post_pipe_false() {
-        let cli = make_cli_with_post(PostCaptureAction::Pipe);
+        cli.mode.range = Some("100,200,500,400".into());
         assert!(!needs_gui(&cli));
     }
 

@@ -719,9 +719,6 @@ pub struct Cli {
     #[command(flatten)]
     pub mode: CaptureMode,
 
-    #[arg(short, long, value_name = "ACTION")]
-    pub post: Option<PostCaptureAction>,
-
     #[arg(long)]
     pub stdout: bool,
 
@@ -731,11 +728,8 @@ pub struct Cli {
     #[arg(long, value_name = "CMD")]
     pub exec: Option<String>,
 
-    #[arg(long)]
+    #[arg(short, long)]
     pub clipboard: bool,
-
-    #[arg(long)]
-    pub silent: bool,
 
     #[arg(long)]
     pub cursor: bool,
@@ -745,28 +739,22 @@ pub struct Cli {
 
     #[arg(long)]
     pub debug_protocol: bool,
-
-    #[arg(short, long, value_name = "PATH")]
-    pub config: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
 #[group(required = false, multiple = false)]
 pub struct CaptureMode {
-    #[arg(long)]
-    pub full: bool,          // 当前屏幕全屏
+    #[arg(long, visible_alias = "full")]
+    pub screen: bool,          // 当前屏幕全屏
+
+    #[arg(short, long, visible_alias = "full-all")]
+    pub all_screen: bool,      // 拼接所有屏幕
+
+    #[arg(short, long, value_name = "X,Y,W,H", num_args = 0..=1, default_missing_value = "")]
+    pub range: Option<String>, // 区域选择（交互式或坐标）
 
     #[arg(long)]
-    pub full_all: bool,      // 拼接所有屏幕
-
-    #[arg(long)]
-    pub area: bool,          // 当前屏幕区域选择
-
-    #[arg(long)]
-    pub window: bool,        // 当前屏幕窗口截图
-
-    #[arg(id = "screen", long = "screen")]
-    pub output: bool,        // 当前屏幕（同 full，语义别名），CLI 标识为 --screen 以避免与 -o/--output PATH 冲突
+    pub window: bool,          // 窗口截图
 
     #[arg(long, value_name = "PATH")]
     pub pin: Option<Option<PathBuf>>,
@@ -785,10 +773,9 @@ CLI 显式参数 > 配置文件 > 默认值：
 
 1. `--stdout` → stdout
 2. `--exec CMD` → 外部程序
-3. `--clipboard` → 剪贴板
-4. `--output PATH` / `--silent` → 保存到指定路径
-5. `--post ACTION` → 覆盖配置
-6. `general.post_capture` 配置值
+3. `--clipboard` / `-c` → 剪贴板
+4. `--output PATH` / `-o` → 保存到指定路径
+5. `general.post_capture` 配置值
 
 ---
 
@@ -800,17 +787,16 @@ CLI 显式参数 > 配置文件 > 默认值：
 
 | 命令 | 行为 |
 |------|------|
-| `--full` | 捕获当前指针所在屏幕 |
-| `--full-all` | 捕获所有输出并拼接为一张大图 |
-| `--area` | 在当前指针所在屏幕上进入区域选择 |
+| `--screen` / `--full` | 捕获当前指针所在屏幕 |
+| `--all-screen` / `-a` / `--full-all` | 捕获所有输出并拼接为一张大图 |
+| `--range` / `-r` | 在当前指针所在屏幕上进入区域选择 |
 | `--window` | 在当前指针所在屏幕上枚举窗口并选择 |
-| `--screen` | 同 `--full`（原 `--output`，为避免与 `-o/--output PATH` 冲突而改名） |
 
 **当前屏幕判定**：通过 `wl_pointer` 的 `wl_surface::enter` 事件或查询 pointer 所在 `wl_output` 确定。平台初始化时缓存所有 output 的几何信息，根据指针全局坐标匹配。
 
 ### 7.2 区域选择（layer-shell overlay 方案）
 
-交互式 `--area` 使用原生 `zwlr_layer_shell_v1` Overlay 层实现真正的全屏覆盖，体验最佳：
+交互式 `--range` 使用原生 `zwlr_layer_shell_v1` Overlay 层实现真正的全屏覆盖，体验最佳：
 
 1. 通过 sctk 创建 `LayerSurface`，设置 `Layer::Overlay` + `Anchor::ALL` + `KeyboardInteractivity::Exclusive`。
 2. 使用 `wl_shm` + `SlotPool` 进行软件渲染：
