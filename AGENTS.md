@@ -142,6 +142,12 @@ cargo clippy
 - 修改代码时，同步更新 `docs/dev/` 下对应的设计文档。
 - 技术选型变更时，在 `docs/dev/02-design.md` 的 ADR 章节记录决策。
 
+## 贡献指南
+
+- 详细的开发环境搭建、代码规范、贡献流程请参考 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+- 提交前请运行 `cargo fmt`、`cargo clippy` 和 `cargo test` 确保质量。
+- PR 标题遵循 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/) 规范。
+
 ---
 
 ## 配置系统

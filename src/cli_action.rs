@@ -146,10 +146,12 @@ mod tests {
         cli
     }
 
+    #[allow(dead_code)]
     fn make_cli_with_silent() -> Cli {
-        let mut cli = make_cli_screen();
-        cli
+        make_cli_screen()
     }
+
+
 
     fn make_config_with_post_capture(value: &str) -> Config {
         let mut config = Config::default();
@@ -170,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_clipboard_wins_over_save() {
-        let mut cli = make_cli_with_clipboard();
+        let cli = make_cli_with_clipboard();
         let config = Config::default();
         assert!(
             matches!(determine_output_action(&cli, &config), OutputAction::Clipboard),

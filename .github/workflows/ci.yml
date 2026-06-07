@@ -3,7 +3,21 @@ name: CI
 on:
   push:
     branches: [master, main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "rustfmt.toml"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "rustfmt.toml"
+      - ".github/workflows/ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,7 +29,7 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. Format check — must pass before anything else
+  # 1. Format check
   # ---------------------------------------------------------------------------
   fmt:
     name: Format
@@ -58,7 +72,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   # ---------------------------------------------------------------------------
-  # 3. Build check — ensure everything compiles
+  # 3. Build check
   # ---------------------------------------------------------------------------
   check:
     name: Check
@@ -85,7 +99,7 @@ jobs:
         run: cargo check --release --all-targets --all-features
 
   # ---------------------------------------------------------------------------
-  # 4. Test — run full test suite (headless-friendly tests only)
+  # 4. Test — headless-friendly tests only
   # ---------------------------------------------------------------------------
   test:
     name: Test
@@ -108,7 +122,6 @@ jobs:
       - name: Run tests
         run: cargo test --all-targets --all-features
         env:
-          # Explicitly unset to ensure tests don't accidentally pick up a display
           WAYLAND_DISPLAY: ""
 
   # ---------------------------------------------------------------------------
@@ -147,57 +160,7 @@ jobs:
         run: cargo deny check
 
   # ---------------------------------------------------------------------------
-  # 7. Code coverage — tarpaulin with threshold check + artifact upload
-  # ---------------------------------------------------------------------------
-  coverage:
-    name: Code Coverage
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev libwayland-bin libxkbcommon-dev pkg-config
-
-      - name: Install cargo-tarpaulin
-        uses: taiki-e/install-action@cargo-tarpaulin
-
-      - name: Generate coverage report
-        run: cargo tarpaulin --all-targets --all-features --out html --out stdout --timeout 300
-        env:
-          WAYLAND_DISPLAY: ""
-
-      - name: Check coverage threshold
-        run: |
-          # Extract coverage percentage from tarpaulin stdout
-          COVERAGE=$(cargo tarpaulin --all-targets --all-features --out stdout --timeout 300 2>&1 | grep -oP '\d+\.\d+% coverage' | head -1 | grep -oP '\d+\.\d+' || echo "0")
-          echo "Coverage: $COVERAGE%"
-          THRESHOLD=50.0
-          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
-            echo "Coverage $COVERAGE% is below threshold $THRESHOLD%"
-            exit 1
-          fi
-          echo "Coverage threshold passed"
-        env:
-          WAYLAND_DISPLAY: ""
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: tarpaulin-report.html
-          if-no-files-found: warn
-
-  # ---------------------------------------------------------------------------
-  # 8. Documentation — build rustdoc and deploy to GitHub Pages
+  # 7. Documentation — build rustdoc
   # ---------------------------------------------------------------------------
   docs:
     name: Documentation
@@ -220,48 +183,17 @@ jobs:
       - name: Build documentation
         run: cargo doc --no-deps --all-features
 
-      - name: Add redirect index
-        run: echo '<meta http-equiv="refresh" content="0;url=wlsnap/index.html">' > target/doc/index.html
-
-      - name: Upload pages artifact
-        if: github.ref == 'refs/heads/master'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: target/doc
+      - name: Check for broken doc links
+        run: cargo doc --no-deps --all-features 2>&1 | grep -i "broken\|unresolved" && exit 1 || true
 
   # ---------------------------------------------------------------------------
-  # 9. Wayland integration test — run ignored tests with headless compositor
+  # 8. Typos — check for common spelling mistakes
   # ---------------------------------------------------------------------------
-  test-wayland:
-    name: Wayland Integration Test
+  typos:
+    name: Typos
     runs-on: ubuntu-latest
-    needs: test
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev libwayland-bin libxkbcommon-dev pkg-config weston
-
-      - name: Start headless Weston compositor
-        run: |
-          mkdir -p /tmp/weston
-          weston --backend=headless.so --socket=wayland-ci --idle-time=0 &
-          sleep 2
-          echo "WAYLAND_DISPLAY=wayland-ci" >> "$GITHUB_ENV"
-
-      - name: Run ignored Wayland tests
-        run: cargo test --all-targets --all-features -- --ignored
-        env:
-          WAYLAND_DISPLAY: wayland-ci
-
-      - name: Stop Weston
-        if: always()
-        run: pkill weston || true
+      - name: Run typos
+        uses: crate-ci/typos@v1

@@ -152,11 +152,13 @@ impl LayerSelector {
         }
 
         // Pre-allocate slots on first configure.
+        #[allow(clippy::collapsible_if)]
         if self.slot_a.is_none() {
             if let Ok(slot) = self.pool.new_slot(buf_size) {
                 self.slot_a = Some(slot);
             }
         }
+        #[allow(clippy::collapsible_if)]
         if self.slot_b.is_none() {
             if let Ok(slot) = self.pool.new_slot(buf_size) {
                 self.slot_b = Some(slot);
@@ -200,10 +202,10 @@ impl LayerSelector {
         const MIN_TIME_BETWEEN_DRAWS: Duration = Duration::from_millis(16);
         const MIN_DISTANCE: f64 = 2.0;
 
-        if let Some(last_time) = self.last_draw_time {
-            if Instant::now().duration_since(last_time) < MIN_TIME_BETWEEN_DRAWS {
-                return false;
-            }
+        if let Some(last_time) = self.last_draw_time
+            && Instant::now().duration_since(last_time) < MIN_TIME_BETWEEN_DRAWS
+        {
+            return false;
         }
 
         if let Some(last_pos) = self.last_drawn_pos {

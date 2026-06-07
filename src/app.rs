@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_determine_output_action_clipboard_wins_over_save() {
-        let mut cli = make_cli_with_clipboard();
+        let cli = make_cli_with_clipboard();
         let app = make_app_with_cli(cli);
         assert!(
             matches!(app.determine_output_action(), OutputAction::Clipboard),
