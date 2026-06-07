@@ -1,24 +1,51 @@
 use crate::error::{Result, WlsnapError};
 use image::RgbaImage;
-use std::borrow::Cow;
+use std::process::{Command, Stdio};
 
 /// Copy an RGBA image to the system clipboard.
+/// On Linux Wayland, uses wl-copy which daemonizes to keep data alive.
 pub fn copy_to_clipboard(image: &RgbaImage) -> Result<()> {
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| WlsnapError::Clipboard(format!("failed to open clipboard: {e}")))?;
+    // Encode image as PNG into memory.
+    let mut png_bytes: Vec<u8> = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut png_bytes);
+        image
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|e| WlsnapError::Clipboard(format!("png encode: {e}")))?;
+    }
 
-    let (width, height) = image.dimensions();
-    let bytes = Cow::Owned(image.as_raw().clone());
+    let mut child = Command::new("wl-copy")
+        .arg("--type")
+        .arg("image/png")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| WlsnapError::Clipboard(format!("wl-copy spawn: {e}")))?;
 
-    let img_data = arboard::ImageData {
-        width: width as usize,
-        height: height as usize,
-        bytes,
-    };
+    // Write PNG data to wl-copy's stdin and close it.
+    {
+        use std::io::Write;
+        let mut stdin = child.stdin.take().unwrap();
+        stdin
+            .write_all(&png_bytes)
+            .map_err(|e| WlsnapError::Clipboard(format!("wl-copy stdin: {e}")))?;
+        stdin
+            .flush()
+            .map_err(|e| WlsnapError::Clipboard(format!("wl-copy flush: {e}")))?;
+        // stdin is dropped here, closing the pipe.
+    }
 
-    clipboard
-        .set_image(img_data)
-        .map_err(|e| WlsnapError::Clipboard(format!("failed to set image: {e}")))?;
+    // wl-copy daemonizes automatically; just give it a moment to start.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // If wl-copy exited immediately, something went wrong.
+    match child.try_wait() {
+        Ok(Some(status)) if !status.success() => {
+            return Err(WlsnapError::Clipboard("wl-copy exited with error".into()));
+        }
+        _ => {}
+    }
 
     Ok(())
 }
@@ -29,10 +56,8 @@ mod tests {
 
     #[test]
     fn test_clipboard_struct_instantiable() {
-        // arboard may fail on headless systems; we only verify the code path compiles.
         let img = RgbaImage::from_raw(1, 1, vec![255, 0, 0, 255]).unwrap();
         let result = copy_to_clipboard(&img);
-        // Accept either success or a clipboard-specific error.
         assert!(result.is_ok() || result.is_err());
     }
 }

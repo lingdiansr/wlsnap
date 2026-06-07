@@ -336,8 +336,6 @@ fn get_glyph(ch: char, font_size: f32) -> (fontdue::Metrics, Vec<u8>) {
 
 /// Draw a text label using fontdue + tiny-skia.
 fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
-    use tiny_skia::{Color, Paint, Transform};
-
     let font_size = 14.0;
 
     // Measure total width.
