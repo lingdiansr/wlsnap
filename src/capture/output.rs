@@ -57,44 +57,101 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
         captured.push((output.clone(), image));
     }
 
-    // Compute bounding box of all physical geometries.
+    // Compute tight bounding box using logical positions to eliminate gaps.
     //
-    // wlr-screencopy captures images in physical pixels, but logical_geometry
-    // uses compositor logical coordinates (affected by scale factor).  We
-    // derive physical positions from logical_position * scale_factor so the
-    // canvas size and blit offsets match the actual captured image dimensions.
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
+    // Each output's image is in physical pixels (from wlr-screencopy).  We
+    // compute each output's *relative* position in the tight layout by
+    // sorting outputs along each axis and collapsing gaps between them.
+    // This preserves the visual arrangement while removing empty space.
+    //
+    // For each unique logical position along an axis, we compute the max
+    // physical size at that position, then accumulate offsets.
+    let mut sorted_x: Vec<_> = captured
+        .iter()
+        .map(|(o, _)| (o.logical_geometry.min.x, o.physical_size.0 as f64))
+        .collect();
+    sorted_x.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    for (output, _) in &captured {
-        let phys_x = output.logical_geometry.min.x * output.scale_factor;
-        let phys_y = output.logical_geometry.min.y * output.scale_factor;
-        let phys_w = output.physical_size.0 as f64;
-        let phys_h = output.physical_size.1 as f64;
+    let mut sorted_y: Vec<_> = captured
+        .iter()
+        .map(|(o, _)| (o.logical_geometry.min.y, o.physical_size.1 as f64))
+        .collect();
+    sorted_y.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-        min_x = min_x.min(phys_x);
-        min_y = min_y.min(phys_y);
-        max_x = max_x.max(phys_x + phys_w);
-        max_y = max_y.max(phys_y + phys_h);
+    // Build offset maps: logical_position -> tight_offset
+    let mut x_offsets = std::collections::HashMap::new();
+    let mut y_offsets = std::collections::HashMap::new();
+
+    let mut current_x = 0.0;
+    let mut last_logical_x = f64::NEG_INFINITY;
+    let mut max_w_at_x = 0.0;
+    for (logical_x, phys_w) in sorted_x {
+        if (logical_x - last_logical_x).abs() >= 0.001 {
+            // New x position: save offset for previous group, start new group
+            if last_logical_x != f64::NEG_INFINITY {
+                x_offsets.insert(
+                    (last_logical_x * 1000.0).round() as i64,
+                    current_x,
+                );
+                current_x += max_w_at_x;
+            }
+            last_logical_x = logical_x;
+            max_w_at_x = phys_w;
+        } else {
+            // Same x position: track max width
+            max_w_at_x = max_w_at_x.max(phys_w);
+        }
+    }
+    // Don't forget the last group
+    if last_logical_x != f64::NEG_INFINITY {
+        x_offsets.insert(
+            (last_logical_x * 1000.0).round() as i64,
+            current_x,
+        );
+        current_x += max_w_at_x;
     }
 
-    let total_width = (max_x - min_x).round() as u32;
-    let total_height = (max_y - min_y).round() as u32;
+    let mut current_y = 0.0;
+    let mut last_logical_y = f64::NEG_INFINITY;
+    let mut max_h_at_y = 0.0;
+    for (logical_y, phys_h) in sorted_y {
+        if (logical_y - last_logical_y).abs() >= 0.001 {
+            if last_logical_y != f64::NEG_INFINITY {
+                y_offsets.insert(
+                    (last_logical_y * 1000.0).round() as i64,
+                    current_y,
+                );
+                current_y += max_h_at_y;
+            }
+            last_logical_y = logical_y;
+            max_h_at_y = phys_h;
+        } else {
+            max_h_at_y = max_h_at_y.max(phys_h);
+        }
+    }
+    if last_logical_y != f64::NEG_INFINITY {
+        y_offsets.insert(
+            (last_logical_y * 1000.0).round() as i64,
+            current_y,
+        );
+        current_y += max_h_at_y;
+    }
+
+    let total_width = current_x.round() as u32;
+    let total_height = current_y.round() as u32;
 
     if total_width == 0 || total_height == 0 {
         return Err(WlsnapError::Stitching("stitched canvas has zero size"));
     }
 
-    // Create canvas and blit each image
+    // Create canvas and blit each image at tight offsets
     let mut canvas = RgbaImage::new(total_width, total_height);
 
     for (output, image) in &captured {
-        let phys_x = output.logical_geometry.min.x * output.scale_factor;
-        let phys_y = output.logical_geometry.min.y * output.scale_factor;
-        let offset_x = (phys_x - min_x).round() as i64;
-        let offset_y = (phys_y - min_y).round() as i64;
+        let key_x = (output.logical_geometry.min.x * 1000.0).round() as i64;
+        let key_y = (output.logical_geometry.min.y * 1000.0).round() as i64;
+        let offset_x = x_offsets.get(&key_x).copied().unwrap_or(0.0).round() as i64;
+        let offset_y = y_offsets.get(&key_y).copied().unwrap_or(0.0).round() as i64;
 
         let img_w = image.width() as i64;
         let img_h = image.height() as i64;
@@ -121,8 +178,11 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
         name: "stitched".to_string(),
         description: "All screens stitched".to_string(),
         logical_geometry: crate::platform::output_info::LogicalRect {
-            min: crate::platform::output_info::LogicalPoint { x: min_x, y: min_y },
-            max: crate::platform::output_info::LogicalPoint { x: max_x, y: max_y },
+            min: crate::platform::output_info::LogicalPoint { x: 0.0, y: 0.0 },
+            max: crate::platform::output_info::LogicalPoint {
+                x: total_width as f64,
+                y: total_height as f64,
+            },
         },
         physical_size: (total_width, total_height),
         scale_factor: 1.0,
