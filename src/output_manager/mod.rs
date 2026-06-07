@@ -1,5 +1,4 @@
 pub mod clipboard;
-pub mod exec;
 pub mod pipe;
 pub mod save;
 
@@ -13,12 +12,11 @@ pub enum OutputAction {
     Save(Option<PathBuf>),
     Clipboard,
     Pipe,
-    Exec(String),
 }
 
 /// Routes to the correct output method based on action.
 ///
-/// Returns the final path if the image was saved (or a temp path for Exec),
+/// Returns the final path if the image was saved,
 /// otherwise an empty path for Clipboard / Pipe.
 pub fn dispatch(
     image: &image::RgbaImage,
@@ -36,10 +34,6 @@ pub fn dispatch(
         }
         OutputAction::Pipe => {
             pipe::write_to_stdout(image)?;
-            Ok(PathBuf::new())
-        }
-        OutputAction::Exec(cmd) => {
-            exec::exec_with_image(&cmd, image)?;
             Ok(PathBuf::new())
         }
     }

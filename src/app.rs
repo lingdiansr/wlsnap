@@ -89,10 +89,9 @@ impl WlsnapApp {
     ///
     /// Priority (highest first):
     /// 1. `--stdout`  → Pipe
-    /// 2. `--exec CMD` → Exec(cmd)
-    /// 3. `--clipboard` → Clipboard
-    /// 4. `-o PATH` → Save(Some(path))
-    /// 5. `general.post_capture` config → default action
+    /// 2. `--clipboard` → Clipboard
+    /// 3. `-o PATH` → Save(Some(path))
+    /// 4. `general.post_capture` config → default action
     fn determine_output_action(&self) -> OutputAction {
         let cli = self
             .cli
@@ -101,9 +100,6 @@ impl WlsnapApp {
 
         if cli.stdout {
             return OutputAction::Pipe;
-        }
-        if let Some(ref cmd) = cli.exec {
-            return OutputAction::Exec(cmd.clone());
         }
         if cli.clipboard {
             return OutputAction::Clipboard;
@@ -257,28 +253,6 @@ mod tests {
             },
             stdout: true,
             output: None,
-            exec: None,
-            clipboard: false,
-            cursor: false,
-            list_outputs: false,
-            debug_protocol: false,
-        }
-    }
-
-    fn make_cli_with_exec(cmd: &str) -> Cli {
-        Cli {
-            mode: wlsnap::cli::CaptureMode {
-                screen: true,
-                all_screen: false,
-                range: None,
-                window: false,
-                pin: None,
-                scroll_auto: false,
-                scroll_manual: false,
-            },
-            stdout: false,
-            output: None,
-            exec: Some(cmd.into()),
             clipboard: false,
             cursor: false,
             list_outputs: false,
@@ -299,7 +273,6 @@ mod tests {
             },
             stdout: false,
             output: None,
-            exec: None,
             clipboard: true,
             cursor: false,
             list_outputs: false,
@@ -320,7 +293,6 @@ mod tests {
             },
             stdout: false,
             output: Some(path),
-            exec: None,
             clipboard: false,
             cursor: false,
             list_outputs: false,
@@ -417,17 +389,6 @@ mod tests {
         let cli = make_cli_with_stdout();
         let app = make_app_with_cli(cli);
         assert!(matches!(app.determine_output_action(), OutputAction::Pipe));
-    }
-
-    #[test]
-    fn test_determine_output_action_exec_wins_over_clipboard() {
-        let mut cli = make_cli_with_exec("echo {file}");
-        cli.clipboard = true;
-        let app = make_app_with_cli(cli);
-        match app.determine_output_action() {
-            OutputAction::Exec(cmd) => assert_eq!(cmd, "echo {file}"),
-            other => panic!("expected Exec, got {:?}", other),
-        }
     }
 
     #[test]

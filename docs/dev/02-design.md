@@ -134,11 +134,10 @@ wlsnap/
     │   └── font.rs              # 系统字体枚举、加载、选择（fontdb + rustybuzz）
     │
     ├── output_manager/          # 输出与分发
-    │   ├── mod.rs               # 分发路由（save / clipboard / pipe / exec）
+    │   ├── mod.rs               # 分发路由（save / clipboard / pipe）
     │   ├── save.rs              # 文件保存、路径占位符展开、格式选择
     │   ├── clipboard.rs         # 剪贴板操作（arboard → wl-copy）
-    │   ├── pipe.rs              # stdout / 外部程序管道输出
-    │   └── exec.rs              # --exec 调用外部编辑器
+    │   └── pipe.rs              # stdout / 管道输出
     │
     └── platform/                # 平台抽象
         ├── mod.rs               # 平台能力探测
@@ -548,7 +547,7 @@ Idle ──► SelectingRegion ──► Capturing ──► Editing ──► C
   └──► Pinning (打开已有 Pin 窗口，不影响主状态)
 
 > **v0.1.0 状态机简化**: v0.1.0 不涉及 `SelectingRegion`、`SelectingWindow`、`Editing`、
-> `Scrolling`、`ChoosingAction` 状态。截图完成后直接执行输出动作（Save/Clipboard/Pipe/Exec），
+> `Scrolling`、`ChoosingAction` 状态。截图完成后直接执行输出动作（Save/Clipboard/Pipe），
 > 不进入编辑器。`Capturing` 状态用于显示进度/等待提示，完成后立即回到 `Idle`。
 ```
 
@@ -725,9 +724,6 @@ pub struct Cli {
     #[arg(short, long, value_name = "PATH")]
     pub output: Option<PathBuf>,
 
-    #[arg(long, value_name = "CMD")]
-    pub exec: Option<String>,
-
     #[arg(short, long)]
     pub clipboard: bool,
 
@@ -771,11 +767,10 @@ pub struct CaptureMode {
 
 CLI 显式参数 > 配置文件 > 默认值：
 
-1. `--stdout` → stdout
-2. `--exec CMD` → 外部程序
-3. `--clipboard` / `-c` → 剪贴板
-4. `--output PATH` / `-o` → 保存到指定路径
-5. `general.post_capture` 配置值
+1. `--stdout` → stdout（管道传输）
+2. `--clipboard` / `-c` → 剪贴板
+3. `--output PATH` / `-o` → 保存到指定路径
+4. `general.post_capture` 配置值
 
 ---
 
@@ -1044,24 +1039,8 @@ pub fn save_image(image: &RgbaImage, config: &GeneralConfig, mode: &str) -> Resu
 
 | 触发方式 | 行为 |
 |----------|------|
-| `--stdout` | PNG 编码后写入 `std::io::stdout()`，然后立即退出 |
-| `--exec CMD` | 保存到 `/tmp/wlsnap_*.png`，用 `std::process::Command` 执行命令（**不使用 `sh -c`**），`{file}` 替换为临时文件路径。等待子进程退出后删除临时文件 |
+| `--stdout` | PNG 编码后写入 `std::io::stdout()`，通过管道传输给后续程序处理 |
 | `--clipboard` | 调用 `arboard` → 底层使用 `wl-copy` |
-
-**`--exec` 安全处理**：
-```rust
-// 防注入：不使用 shell，直接解析命令为参数列表
-fn exec_external(cmd_template: &str, file_path: &Path) -> Result<()> {
-    let cmd_str = cmd_template.replace("{file}", file_path.to_str().unwrap());
-    let args = shell_words::split(&cmd_str)?;  // 需要 shell-words crate
-    if args.is_empty() { return Err(...); }
-    let mut command = std::process::Command::new(&args[0]);
-    command.args(&args[1:]);
-    let status = command.status()?;
-    if !status.success() { return Err(...); }
-    Ok(())
-}
-```
 
 ---
 
@@ -1135,7 +1114,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 剪贴板被占用 | `arboard` 返回错误后重试 3 次（间隔 100ms），仍失败则弹窗提示 |
 | Portal 调用超时 | tokio timeout 10s，取消后尝试下一个后端（如从 Portal 降级到 wlr-screencopy） |
 | 长截图时目标窗口关闭 | 捕获失败 → `BackendEvent::Error` → 提示用户，返回已拼接部分 |
-| `--exec` 命令不存在 | `std::io::ErrorKind::NotFound` → 报错并**保留临时文件**，不删除 |
+| 管道输出失败 | `std::io::ErrorKind::BrokenPipe` → 报错退出 |
 | 配置文件中存在未知字段 | `serde` 默认忽略，但启动时 `tracing::warn!` 记录 |
 | 图像尺寸过大（> 16384px 高度） | 长截图时检测到则警告用户并停止，避免内存溢出 |
 | 多屏拼接时单屏捕获失败 | 记录警告，跳过该屏，继续拼接其余 |
@@ -1178,7 +1157,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 单实例锁文件 | 使用 `~/.cache/wlsnap/instance.sock`（Unix domain socket），而非 `/tmp/wlsnap.lock`，避免其他用户干扰 |
 | 截图文件权限 | 保存时设置 `chmod 600`，防止其他用户读取 |
 | 配置文件权限 | 创建 `~/.config/wlsnap/` 时设置目录权限 `0o700` |
-| `--exec` 防注入 | 使用 `shell-words` crate 解析参数列表，通过 `std::process::Command` 直接执行，**禁止** `sh -c` |
+| 管道安全 | 直接写入 stdout，无 shell 注入风险 |
 | Portal restore token | 存储在 `~/.cache/wlsnap/portal_token.json`，目录权限 `0o700` |
 | 日志脱敏 | 避免在日志中记录窗口 title（可能包含敏感信息），仅记录 `app_id` 和哈希化 `id` |
 
@@ -1207,9 +1186,9 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | backend | `wlr-screencopy` 后端；协议探测框架 | 仅支持 wlroots 系 compositor |
 | capture | 单屏/全屏捕获；多屏拼接（`--full-all`）；区域截图（`--area` 坐标 / `--area` 交互选区） | `--area` 支持直接坐标（headless）和交互选区（layer-shell overlay）两种模式 |
 | ui | eframe 最小窗口（仅用于事件循环，无实际 GUI 交互） | v0.1.0 不显示编辑器、选区、Pin 窗口 |
-| output_manager | 保存（PNG/JPEG/WebP）；剪贴板（arboard）；stdout 输出；`--exec` | 完整输出分发 |
+| output_manager | 保存（PNG/JPEG/WebP）；剪贴板（arboard）；stdout 输出 | 完整输出分发 |
 | config | TOML 解析；默认值；路径占位符展开 | |
-| cli | `--full`, `--full-all`, `--area`, `--screen`, `--stdout`, `-o`, `--exec`, `--clipboard` | |
+| cli | `--full`, `--full-all`, `--area`, `--screen`, `--stdout`, `-o`, `--clipboard` | |
 
 ### v0.2.0 ── 选区+编辑（M2）
 
@@ -1271,7 +1250,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 字体 | fontdb + rustybuzz | fontdb 扫描系统字体无依赖；rustybuzz 纯 Rust，支持复杂脚本 shaping |
 | 长截图预览 | 缩略图传输 | 避免每帧在 channel 中传递数 MB 的完整图像 |
 | eframe 辅助功能 | 禁用 `accesskit` | `ashpd` 启用 zbus 的 tokio 特性后，accesskit 启动的线程无 tokio runtime 导致 panic；禁用后可避免冲突 |
-| exec 安全 | shell-words + 直接 exec | 防止命令注入攻击 |
+| 管道优先 | `--stdout` 直接输出 PNG 到 stdout | 类似 grim，通过管道传输给后续程序 |
 | 版本策略 | v0.1.0 = M1（CLI截图），v0.2.0 = M2（编辑），v0.3.0 = M3（Pin+长截图） | 先发布最小可用版本，快速获取用户反馈；编辑器/标注作为 v0.2.0 核心卖点 |
 
 ---
@@ -1296,7 +1275,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 错误处理 | `thiserror`, `anyhow` | ^1 | 结构化错误 / 顶层传播 |
 | 工具 | `uuid` | ^1 | Pin 窗口标识 |
 | 工具 | `bitflags` | ^2 | CaptureCapabilities |
-| 工具 | `shell-words` | ^1 | `--exec` 参数安全解析 |
+| 工具 | `shell-words` | ^1 | （已移除，无替代需求） |
 | 序列化 | `toml`, `serde` | ^1 | 配置读写 |
 | 测试（dev）| `tempfile` | ^3 | 单元测试临时目录 |
 

@@ -17,10 +17,6 @@ pub struct Cli {
     #[arg(short, long, value_name = "PATH")]
     pub output: Option<PathBuf>,
 
-    /// Execute a command with the captured image file path
-    #[arg(long, value_name = "CMD")]
-    pub exec: Option<String>,
-
     /// Copy the image to the clipboard
     #[arg(short, long)]
     pub clipboard: bool,

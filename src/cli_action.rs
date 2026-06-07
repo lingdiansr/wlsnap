@@ -14,16 +14,12 @@ use crate::output_manager::{OutputAction, dispatch};
 ///
 /// Priority (highest first):
 /// 1. `--stdout`  → Pipe
-/// 2. `--exec CMD` → Exec(cmd)
-/// 3. `--clipboard` → Clipboard
-/// 4. `-o PATH` → Save(Some(path))
-/// 5. `general.post_capture` config → fallback
+/// 2. `--clipboard` → Clipboard
+/// 3. `-o PATH` → Save(Some(path))
+/// 4. `general.post_capture` config → fallback
 pub fn determine_output_action(cli: &Cli, config: &Config) -> OutputAction {
     if cli.stdout {
         return OutputAction::Pipe;
-    }
-    if let Some(ref cmd) = cli.exec {
-        return OutputAction::Exec(cmd.clone());
     }
     if cli.clipboard {
         return OutputAction::Clipboard;
@@ -125,7 +121,6 @@ mod tests {
             },
             stdout: false,
             output: None,
-            exec: None,
             clipboard: false,
             cursor: false,
             list_outputs: false,
@@ -136,12 +131,6 @@ mod tests {
     fn make_cli_with_stdout() -> Cli {
         let mut cli = make_cli_screen();
         cli.stdout = true;
-        cli
-    }
-
-    fn make_cli_with_exec(cmd: &str) -> Cli {
-        let mut cli = make_cli_screen();
-        cli.exec = Some(cmd.into());
         cli
     }
 
@@ -177,17 +166,6 @@ mod tests {
         let cli = make_cli_with_stdout();
         let config = Config::default();
         assert!(matches!(determine_output_action(&cli, &config), OutputAction::Pipe));
-    }
-
-    #[test]
-    fn test_exec_wins_over_clipboard() {
-        let mut cli = make_cli_with_exec("echo {file}");
-        cli.clipboard = true;
-        let config = Config::default();
-        match determine_output_action(&cli, &config) {
-            OutputAction::Exec(cmd) => assert_eq!(cmd, "echo {file}"),
-            other => panic!("expected Exec, got {:?}", other),
-        }
     }
 
     #[test]
