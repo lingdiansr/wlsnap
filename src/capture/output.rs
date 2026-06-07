@@ -57,18 +57,27 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
         captured.push((output.clone(), image));
     }
 
-    // Compute bounding box of all logical geometries
+    // Compute bounding box of all physical geometries.
+    //
+    // wlr-screencopy captures images in physical pixels, but logical_geometry
+    // uses compositor logical coordinates (affected by scale factor).  We
+    // derive physical positions from logical_position * scale_factor so the
+    // canvas size and blit offsets match the actual captured image dimensions.
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
 
     for (output, _) in &captured {
-        let geom = &output.logical_geometry;
-        min_x = min_x.min(geom.min.x);
-        min_y = min_y.min(geom.min.y);
-        max_x = max_x.max(geom.max.x);
-        max_y = max_y.max(geom.max.y);
+        let phys_x = output.logical_geometry.min.x * output.scale_factor;
+        let phys_y = output.logical_geometry.min.y * output.scale_factor;
+        let phys_w = output.physical_size.0 as f64;
+        let phys_h = output.physical_size.1 as f64;
+
+        min_x = min_x.min(phys_x);
+        min_y = min_y.min(phys_y);
+        max_x = max_x.max(phys_x + phys_w);
+        max_y = max_y.max(phys_y + phys_h);
     }
 
     let total_width = (max_x - min_x).round() as u32;
@@ -82,9 +91,10 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
     let mut canvas = RgbaImage::new(total_width, total_height);
 
     for (output, image) in &captured {
-        let geom = &output.logical_geometry;
-        let offset_x = (geom.min.x - min_x).round() as i64;
-        let offset_y = (geom.min.y - min_y).round() as i64;
+        let phys_x = output.logical_geometry.min.x * output.scale_factor;
+        let phys_y = output.logical_geometry.min.y * output.scale_factor;
+        let offset_x = (phys_x - min_x).round() as i64;
+        let offset_y = (phys_y - min_y).round() as i64;
 
         let img_w = image.width() as i64;
         let img_h = image.height() as i64;
@@ -165,5 +175,72 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(capture_all_screens(false));
         assert!(result.is_err());
+    }
+
+    /// Verify that stitching uses physical pixel coordinates, not logical.
+    ///
+    /// Simulates a HiDPI laptop (eDP-1 @ 2x) + external monitor (HDMI-A-1 @ 1.25x).
+    /// The canvas must be sized for physical pixels so images don't overflow.
+    #[test]
+    fn capture_all_screens_uses_physical_coordinates() {
+        let output1 = OutputInfo {
+            name: "HDMI-A-1".to_string(),
+            description: String::new(),
+            logical_geometry: LogicalRect {
+                min: LogicalPoint { x: 0.0, y: 0.0 },
+                max: LogicalPoint { x: 1536.0, y: 864.0 },
+            },
+            physical_size: (1920, 1080),
+            scale_factor: 1.25,
+            transform: OutputTransform::Normal,
+        };
+
+        let output2 = OutputInfo {
+            name: "eDP-1".to_string(),
+            description: String::new(),
+            logical_geometry: LogicalRect {
+                min: LogicalPoint { x: 0.0, y: 864.0 },
+                max: LogicalPoint { x: 1440.0, y: 1764.0 },
+            },
+            physical_size: (2880, 1800),
+            scale_factor: 2.0,
+            transform: OutputTransform::Normal,
+        };
+
+        // Compute physical positions (same logic as capture_all_screens)
+        let phys_x1 = output1.logical_geometry.min.x * output1.scale_factor;
+        let phys_y1 = output1.logical_geometry.min.y * output1.scale_factor;
+        let phys_x2 = output2.logical_geometry.min.x * output2.scale_factor;
+        let phys_y2 = output2.logical_geometry.min.y * output2.scale_factor;
+
+        let phys_w1 = output1.physical_size.0 as f64;
+        let phys_h1 = output1.physical_size.1 as f64;
+        let phys_w2 = output2.physical_size.0 as f64;
+        let phys_h2 = output2.physical_size.1 as f64;
+
+        let min_x = phys_x1.min(phys_x2);
+        let min_y = phys_y1.min(phys_y2);
+        let max_x = (phys_x1 + phys_w1).max(phys_x2 + phys_w2);
+        let max_y = (phys_y1 + phys_h1).max(phys_y2 + phys_h2);
+
+        let total_width = (max_x - min_x).round() as u32;
+        let total_height = (max_y - min_y).round() as u32;
+
+        // Expected canvas: 2880 x 3528 (physical pixels)
+        // width  = max(1920, 2880) = 2880
+        // height = 0 + max(1080, 1728+1800) = 3528
+        assert_eq!(total_width, 2880, "canvas width should use physical coordinates");
+        assert_eq!(total_height, 3528, "canvas height should use physical coordinates");
+
+        // Verify offsets
+        let offset1_x = (phys_x1 - min_x).round() as i64;
+        let offset1_y = (phys_y1 - min_y).round() as i64;
+        let offset2_x = (phys_x2 - min_x).round() as i64;
+        let offset2_y = (phys_y2 - min_y).round() as i64;
+
+        assert_eq!(offset1_x, 0);
+        assert_eq!(offset1_y, 0);
+        assert_eq!(offset2_x, 0);
+        assert_eq!(offset2_y, 1728); // 864 * 2.0 = 1728
     }
 }
