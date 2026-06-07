@@ -5,6 +5,8 @@
 
 纯 Rust 编写的 Wayland 截图工具，面向 Hyprland、Sway、Niri、GNOME、KDE 等主流 Linux 桌面环境。
 
+> **本项目由 [Kimi Code](https://kimi.moonshot.cn) 与 Kimi k2.6 模型辅助编写。**
+
 ## 功能
 
 | 功能 | 状态 | 说明 |
