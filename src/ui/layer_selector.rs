@@ -336,45 +336,58 @@ fn get_glyph(ch: char, font_size: f32) -> (fontdue::Metrics, Vec<u8>) {
 
 /// Draw a text label using fontdue + tiny-skia.
 fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
-    use tiny_skia::{Color, Paint, Transform};
-
     let font_size = 14.0;
-    let mut paint = Paint::default();
-    paint.set_color(Color::from_rgba8(255, 255, 255, 255));
-    paint.anti_alias = true;
+
+    // Use a fixed advance width for monospace alignment.
+    let space_metrics = get_glyph(' ', font_size).0;
+    let fixed_advance = space_metrics.advance_width;
 
     // Measure total width.
-    let mut total_width = 0.0f32;
-    for ch in text.chars() {
-        let metrics = get_glyph(ch, font_size).0;
-        total_width += metrics.advance_width;
-    }
+    let total_width = fixed_advance * text.len() as f32;
 
     let mut cx = x - total_width / 2.0;
-    let baseline = y + font_size * 0.35;
+    // y is the desired baseline position.
+    let baseline = y.round();
 
     for ch in text.chars() {
         let (metrics, bitmap) = get_glyph(ch, font_size);
         let gw = metrics.width;
         let gh = metrics.height;
-        let gx = cx + metrics.xmin as f32;
-        let gy = baseline - metrics.ymin as f32 - gh as f32;
+        // fontdue: xmin/ymin are the glyph's bounding box relative to the cursor.
+        // ymin is negative for glyphs that extend above the baseline.
+        let gx = (cx + metrics.xmin as f32).round() as i32;
+        let gy = (baseline + metrics.ymin as f32).round() as i32;
 
-        for row in 0..gh {
-            for col in 0..gw {
-                let alpha = bitmap[row * gw + col];
-                if alpha > 0 {
-                    let px = gx + col as f32;
-                    let py = gy + row as f32;
-                    if let Some(rect) = tiny_skia::Rect::from_xywh(px, py, 1.0, 1.0) {
-                        let mut char_paint = paint.clone();
-                        char_paint.set_color(Color::from_rgba8(255, 255, 255, alpha));
-                        pixmap.fill_rect(rect, &char_paint, Transform::identity(), None);
-                    }
+        // Direct pixel blit into the tiny-skia pixmap.
+        let pw = pixmap.width() as i32;
+        let ph = pixmap.height() as i32;
+        let pixmap_data = pixmap.data_mut();
+
+        for row in 0..gh as i32 {
+            let py = gy + row;
+            if py < 0 || py >= ph {
+                continue;
+            }
+            for col in 0..gw as i32 {
+                let px = gx + col;
+                if px < 0 || px >= pw {
+                    continue;
                 }
+                let alpha = bitmap[(row as usize) * gw + (col as usize)];
+                if alpha == 0 {
+                    continue;
+                }
+                let idx = ((py * pw + px) * 4) as usize;
+                // Alpha blend: dst = src * alpha + dst * (1 - alpha)
+                // src is white (255, 255, 255).
+                let a = alpha as f32 / 255.0;
+                pixmap_data[idx]     = (255.0 * a + pixmap_data[idx] as f32 * (1.0 - a)) as u8;     // R
+                pixmap_data[idx + 1] = (255.0 * a + pixmap_data[idx + 1] as f32 * (1.0 - a)) as u8; // G
+                pixmap_data[idx + 2] = (255.0 * a + pixmap_data[idx + 2] as f32 * (1.0 - a)) as u8; // B
+                pixmap_data[idx + 3] = (alpha as f32 + pixmap_data[idx + 3] as f32 * (1.0 - a)) as u8; // A
             }
         }
-        cx += metrics.advance_width;
+        cx += fixed_advance;
     }
 }
 
