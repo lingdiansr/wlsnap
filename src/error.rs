@@ -32,9 +32,6 @@ pub enum WlsnapError {
     #[error("Another instance is already running")]
     AlreadyRunning,
 
-    #[error("External command failed: {0}")]
-    ExternalCommand(String),
-
     #[error("Wayland disconnected")]
     WaylandDisconnected,
 

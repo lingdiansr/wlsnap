@@ -290,25 +290,12 @@ pub struct WindowInfo {
 /// 用户发起的截图请求
 #[derive(Debug, Clone)]
 pub enum CaptureRequest {
-    FullCurrentScreen,            // --full（当前屏幕）
-    FullAllScreens,               // --full-all（拼接所有屏幕）
-    Region { output: OutputInfo }, // --area（在当前屏幕上选区）
+    FullCurrentScreen,            // --screen（当前屏幕）
+    FullAllScreens,               // --all-screen（拼接所有屏幕）
+    Region { output: OutputInfo }, // --range（在当前屏幕上选区）
     Window,                       // --window（在当前屏幕上选窗口）
     Output { name: String },      // --output NAME（指定输出）
 }
-
-/// 截图完成后可执行的动作
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PostCaptureAction {
-    Edit,       // 打开内置编辑器
-    Save,       // 直接保存
-    Clipboard,  // 复制到剪贴板
-    Pipe,       // 输出到 stdout
-    Ask,        // 弹出选择对话框
-}
-
-/// 从 CLI 或配置解析 PostCaptureAction
-impl FromStr for PostCaptureAction { /* ... */ }
 ```
 
 ### 4.5 后端事件（tokio → UI 线程通信）
@@ -490,7 +477,6 @@ pub enum AppState {
     Capturing {
         request_id: Uuid,
         request: CaptureRequest,
-        post_action: PostCaptureAction,
     },
 
     /// 标注编辑器打开
@@ -502,7 +488,6 @@ pub enum AppState {
         history: HistoryStack,
         active_tool: AnnotationTool,
         viewport: EditorViewport,
-        pending_post_action: PostCaptureAction,
         dirty_rect: Option<PhysicalRect>,      // 脏矩形，用于增量 texture 更新
     },
 
@@ -524,7 +509,6 @@ pub enum AppState {
 /// 等待中的请求元数据
 pub struct PendingRequest {
     pub request: CaptureRequest,
-    pub post_action: PostCaptureAction,
     pub started_at: Instant,
 }
 ```
@@ -646,8 +630,6 @@ pub struct Config {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GeneralConfig {
-    /// edit / save / clipboard / pipe / ask
-    pub post_capture: String,
     pub save_dir: String,
     pub filename_template: String,
     pub format: ImageFormat,        // Png / Jpeg / WebP
@@ -765,12 +747,12 @@ pub struct CaptureMode {
 
 ### 6.3 分发路由优先级
 
-CLI 显式参数 > 配置文件 > 默认值：
+CLI 显式参数 > 默认值：
 
 1. `--stdout` → stdout（管道传输）
 2. `--clipboard` / `-c` → 剪贴板
 3. `--output PATH` / `-o` → 保存到指定路径
-4. `general.post_capture` 配置值
+4. 无参数 → 保存到默认目录
 
 ---
 
@@ -782,10 +764,10 @@ CLI 显式参数 > 配置文件 > 默认值：
 
 | 命令 | 行为 |
 |------|------|
-| `--screen` / `--full` | 捕获当前指针所在屏幕 |
-| `--all-screen` / `-a` / `--full-all` | 捕获所有输出并拼接为一张大图 |
-| `--range` / `-r` | 在当前指针所在屏幕上进入区域选择 |
-| `--window` | 在当前指针所在屏幕上枚举窗口并选择 |
+| `--screen` / `-s` | 捕获当前屏幕 |
+| `--all-screen` / `-a` | 捕获所有输出并拼接为一张大图 |
+| `--range` / `-r` | 在当前屏幕上进入区域选择 |
+| `--window` | 在当前屏幕上枚举窗口并选择 |
 
 **当前屏幕判定**：通过 `wl_pointer` 的 `wl_surface::enter` 事件或查询 pointer 所在 `wl_output` 确定。平台初始化时缓存所有 output 的几何信息，根据指针全局坐标匹配。
 
@@ -803,9 +785,9 @@ CLI 显式参数 > 配置文件 > 默认值：
    - `wl_pointer::Motion` → 实时更新选区，请求 `wl_surface::frame` 重绘
    - `wl_pointer::Release { button: 272 }` → 确认选区，退出事件循环
    - `wl_keyboard::Escape` → 取消选择
-4. 返回 `LogicalRect` 后，主流程将其转换为 `--area x,y,w,h` 并走 headless 捕获路径。
+4. 返回 `LogicalRect` 后，主流程将其转换为 `--range x,y,w,h` 并走 headless 捕获路径。
 
-**GNOME 降级**：GNOME 不实现 `wlr-layer-shell`，交互式 `--area` 退化为 eframe 全屏无边框窗口方案（无边框 + `set_fullscreen(true)` + 半透明遮罩）。
+**GNOME 降级**：GNOME 不实现 `wlr-layer-shell`，交互式 `--range` 退化为 eframe 全屏无边框窗口方案（无边框 + `set_fullscreen(true)` + 半透明遮罩）。
 
 ```rust
 // src/ui/layer_selector.rs 核心逻辑
@@ -1083,9 +1065,6 @@ pub enum WlsnapError {
     #[error("Another instance is already running")]
     AlreadyRunning,
 
-    #[error("External command failed: {0}")]
-    ExternalCommand(String),
-
     #[error("Wayland disconnected")]
     WaylandDisconnected,
 
@@ -1184,11 +1163,11 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 | 模块 | 交付内容 | 说明 |
 |------|----------|------|
 | backend | `wlr-screencopy` 后端；协议探测框架 | 仅支持 wlroots 系 compositor |
-| capture | 单屏/全屏捕获；多屏拼接（`--full-all`）；区域截图（`--area` 坐标 / `--area` 交互选区） | `--area` 支持直接坐标（headless）和交互选区（layer-shell overlay）两种模式 |
+| capture | 单屏/全屏捕获；多屏拼接（`--all-screen`）；区域截图（`--range` 坐标 / `--range` 交互选区） | `--range` 支持直接坐标（headless）和交互选区（layer-shell overlay）两种模式 |
 | ui | eframe 最小窗口（仅用于事件循环，无实际 GUI 交互） | v0.1.0 不显示编辑器、选区、Pin 窗口 |
 | output_manager | 保存（PNG/JPEG/WebP）；剪贴板（arboard）；stdout 输出 | 完整输出分发 |
 | config | TOML 解析；默认值；路径占位符展开 | |
-| cli | `--full`, `--full-all`, `--area`, `--screen`, `--stdout`, `-o`, `--clipboard` | |
+| cli | `--screen`, `--all-screen`, `--range`, `--window`, `--stdout`, `-o`, `--clipboard`, `--cursor` | |
 
 ### v0.2.0 ── 选区+编辑（M2）
 

@@ -141,18 +141,18 @@ src/
 Wayland 无统一全局快捷键协议，**不提供应用内全局热键注册**，而是暴露 CLI 参数，由用户在 compositor 配置中自行绑定：
 
 ```bash
-wayclip --full          # 全屏截图
-wayclip --area          # 区域截图
-wayclip --window        # 窗口截图（如果可用）
-wayclip --output        # 当前屏幕截图
-wayclip --pin           # 贴图（从剪贴板或文件）
-wayclip --scroll-auto   # 自动长截图
-wayclip --scroll-manual # 手动长截图
+wlsnap --screen          # 全屏截图
+wlsnap --range           # 区域截图
+wlsnap --window          # 窗口截图（如果可用）
+wlsnap --all-screen      # 所有屏幕拼接
+wlsnap --pin             # 贴图（从剪贴板或文件）
+wlsnap --scroll-auto     # 自动长截图
+wlsnap --scroll-manual   # 手动长截图
 ```
 
 **各 DE 配置示例**：
-- **Hyprland**：`bind = , Print, exec, wayclip --area`
-- **Sway**：`bindsym Print exec wayclip --area`
+- **Hyprland**：`bind = , Print, exec, wlsnap --range`
+- **Sway**：`bindsym Print exec wlsnap --range`
 - **KDE**：系统设置 → 快捷键 → 自定义快捷键 → 命令
 - **GNOME**：设置 → 键盘 → 自定义快捷键
 

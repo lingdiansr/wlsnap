@@ -107,11 +107,11 @@ v1.0.0（M5 ── 生产就绪）:
 | T16 | 基础输出：`output_manager/save.rs`（PNG/JPEG/WebP+占位符）、`clipboard.rs`（arboard）、`pipe.rs`（stdout） | T1 | 中 | 保存路径占位符展开正确；JPEG质量可调；剪贴板能粘贴到GIMP |
 
 
-**v0.1.0 关键路径**: T1 → T2 → T3 → T4 → T5 → T9 → T16/T17
+**v0.1.0 关键路径**: T1 → T2 → T3 → T4 → T5 → T9 → T16
 
 **v0.1.0 并行策略**:
 - **A组（后端基础）**: T1 → T2 → T3 → T4 → T5 （串行）
-- **B组（CLI+输出）**: T1 → T6 + T16 + T17 （T6/T16 可并行，T17 依赖 T16）
+- **B组（CLI+输出）**: T1 → T6 + T16 （T6/T16 可并行）
 - **C组（eframe+桥接）**: T1 → T8 → T9 （串行）
 
 ---
@@ -180,9 +180,9 @@ v1.0.0（M5 ── 生产就绪）:
 
 ```
 v0.1.0 ──► M1: 能截图并保存到文件
-           达成条件: T1~T5 + T8 + T9 + T16 + T17 完成
-           手动验证: `wlsnap --full` 输出PNG正确；`wlsnap --full -o /tmp/test.png` 保存正确；
-                     `wlsnap --screen --clipboard` 复制到剪贴板可用；`wlsnap --full --stdout | file -` 输出PNG格式
+           达成条件: T1~T5 + T8 + T9 + T16 完成
+           手动验证: `wlsnap --screen` 输出PNG正确；`wlsnap --screen -o /tmp/test.png` 保存正确；
+                     `wlsnap --screen --clipboard` 复制到剪贴板可用；`wlsnap --screen --stdout | file -` 输出PNG格式
 
 v0.2.0 ──► M2: 能选区并编辑
            达成条件: T7 + T10 + T11 + T12 + T13 + T14 + T15 完成

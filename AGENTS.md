@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-wlsnap 是一款仅支持 Wayland 的 Linux 截图工具，面向 KDE、GNOME、Hyprland、Sway、Niri 等主流桌面环境。项目基于 Rust 编写，使用 `egui` + `eframe` 构建 GUI，`smithay-client-toolkit` (sctk) 进行 Wayland 协议交互。当前处于早期开发阶段（v0.1.0），已实现项目骨架、协议探测、基础截图后端、图像引擎、输出管理和编辑器骨架，尚未完成完整用户交互闭环。
+wlsnap 是一款仅支持 Wayland 的 Linux 截图工具，面向 KDE、GNOME、Hyprland、Sway、Niri 等主流桌面环境。项目基于 Rust 编写，使用 `egui` + `eframe` 构建 GUI，`smithay-client-toolkit` (sctk) 进行 Wayland 协议交互。当前处于 v0.1.0 阶段，已实现 CLI 截图闭环（单屏/多屏/区域截图，支持保存/剪贴板/stdout 输出）。
 
 核心功能规划：
 - 基础截图：全屏、区域、窗口、多屏拼接
@@ -42,7 +42,7 @@ src/
   main.rs              # 应用入口：初始化 tracing → 加载配置 → eframe::run_native
   lib.rs               # 库根，pub mod 导出所有子模块
   app.rs               # WlsnapApp：全局状态机 + eframe::App 实现 + tokio runtime
-  cli.rs               # clap v4 命令行定义（CaptureMode / PostCaptureAction）
+  cli.rs               # clap v4 命令行定义（CaptureMode）
   config.rs            # TOML 配置解析、默认值、占位符展开
   error.rs             # 统一错误类型 WlsnapError（thiserror）
   constants.rs         # 常量：APP_NAME、默认路径、默认配置值
@@ -64,7 +64,7 @@ src/
     save.rs            # 文件保存（PNG/JPEG/WebP，占位符展开，Unix 权限 0o600）
     clipboard.rs       # 剪贴板写入（arboard）
     pipe.rs            # stdout PNG 输出
-    exec.rs            # --exec 外部命令调用（shell-words 解析 + 临时文件）
+    exec.rs            # （已移除，v0.1.0 仅保留 --stdout 管道传输）
 
   platform/            # 平台抽象
     mod.rs             # 类型重导出
@@ -94,23 +94,23 @@ cargo build
 # 运行（需要 Wayland 会话）
 cargo run -- --help
 
-# 运行测试（共 70 个单元测试，其中 1 个被 ignore，需在 wlr compositor 下运行）
+# 运行测试（共 121 个单元测试，其中 1 个被 ignore，需在 wlr compositor 下运行）
 cargo test
 
-# 代码格式化检查
-cargo fmt -- --check
+# 代码格式化检查（使用 nightly rustfmt）
+cargo +nightly fmt -- --check
 
 # 静态分析
-cargo clippy
+cargo clippy --all-targets --all-features
 ```
 
-> 注意：`cargo fmt --check` 当前会报告部分文件存在格式差异（主要是 `src/backend/wlr.rs`、`src/output_manager/save.rs`、`src/platform/output_info.rs`、`src/platform/wayland.rs`、`src/ui/editor.rs`、`src/app.rs`），建议执行 `cargo fmt` 统一风格。
+> 注意：项目使用 nightly rustfmt，配置见 `rustfmt.toml`。
 
 ---
 
 ## 代码风格规范
 
-- 使用 `cargo fmt` 统一格式化，不要手动调整 import 顺序或换行。
+- 使用 `cargo +nightly fmt` 统一格式化，不要手动调整 import 顺序或换行。
 - 模块级文档注释使用 `//!`，公共 API 使用 `///`。
 - 错误处理统一使用 `crate::error::{Result, WlsnapError}`，不要混用 `anyhow` 在库代码中（`anyhow` 目前仅在顶层使用）。
 - `unsafe` 代码需附带 `SAFETY:` 注释（参考 `history.rs` 中的 undo/redo 指针用法）。
@@ -124,7 +124,7 @@ cargo clippy
 - **单元测试**：每个 `.rs` 文件底部均包含 `mod tests`，覆盖核心逻辑（坐标转换、颜色解析、撤销栈、配置序列化、CLI 解析、图像格式保存等）。
 - **集成测试**：`backend/wlr.rs` 中的 `capture_real_output` 被 `#[ignore]`，需在真实 wlr compositor 会话下手动运行。
 - **CI 友好**：所有非 ignore 测试均可在无 Wayland 显示、无剪贴板服务的环境下通过。
-- **当前状态**：`cargo test` 共 70 个测试，66 passed + 1 ignored + 3 来自 binary（全部通过）。
+- 当前状态：`cargo test` 共 121 个测试全部通过（含 1 个 ignore，需在真实 wlr compositor 下运行）。
 
 ---
 
@@ -164,7 +164,7 @@ cargo clippy
 
 - 配置文件和截图保存目录在 Unix 下强制设置 `0o700` / `0o600` 权限，避免其他用户读取。
 - Portal restore token 默认持久化到 `~/.cache/wlsnap/portal_token.json`，可通过配置关闭。
-- `exec.rs` 使用 `shell_words::split` 解析外部命令，避免简单字符串拼接导致的注入风险；临时文件在命令失败时保留以便调试。
+- Wayland 环境变量（`WAYLAND_DISPLAY`）缺失时，所有模块均安全降级，不会 panic。
 - Wayland 环境变量（`WAYLAND_DISPLAY`）缺失时，所有模块均安全降级，不会 panic。
 
 ---
@@ -189,9 +189,9 @@ cargo clippy
 | wlr-screencopy 后端 | 完整（单帧 SHM 捕获） |
 | 图像引擎（坐标/颜色/变换/互操作） | 完整 |
 | 撤销栈 | 完整 |
-| 输出管理（保存/剪贴板/管道/执行） | 完整 |
+| 输出管理（保存/剪贴板/管道） | 完整 |
 | 编辑器骨架（zoom/pan/texture） | 骨架完成，标注工具待实现 |
-| 区域选择 UI | 尚未实现 |
+| 区域选择 UI | 已实现（layer-shell + eframe fallback） |
 | Pin 贴图 | 尚未实现 |
 | 长截图（Auto/Manual） | 尚未实现 |
 | Portal 后端 | 尚未实现 |

@@ -1,7 +1,7 @@
 //! Screenshot capture orchestration.
 //!
 //! Coordinates between the platform layer (output enumeration), backend
-//! (wlr-screencopy), and output manager (save/clipboard/pipe/exec).
+//! (wlr-screencopy), and output manager (save/clipboard/pipe).
 
 pub mod output;
 pub mod region;
