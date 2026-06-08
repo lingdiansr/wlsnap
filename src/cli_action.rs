@@ -18,8 +18,8 @@ use crate::{
 /// 1. `--stdout`  → Pipe
 /// 2. `--clipboard` → Clipboard
 /// 3. `-o PATH` → Save(Some(path))
-/// 4. `general.post_capture` config → fallback
-pub fn determine_output_action(cli: &Cli, config: &Config) -> OutputAction {
+/// 4. Default → Save(None)
+pub fn determine_output_action(cli: &Cli, _config: &Config) -> OutputAction {
     if cli.stdout {
         return OutputAction::Pipe;
     }
@@ -30,17 +30,7 @@ pub fn determine_output_action(cli: &Cli, config: &Config) -> OutputAction {
         return OutputAction::Save(Some(path.clone()));
     }
 
-    parse_post_capture_config(&config.general.post_capture)
-}
-
-/// Parse the `general.post_capture` config string into an `OutputAction`.
-fn parse_post_capture_config(value: &str) -> OutputAction {
-    match value.to_lowercase().as_str() {
-        "clipboard" => OutputAction::Clipboard,
-        "pipe" => OutputAction::Pipe,
-        "save" | "edit" | "ask" => OutputAction::Save(None),
-        _ => OutputAction::Save(None),
-    }
+    OutputAction::Save(None)
 }
 
 /// Returns `true` if the selected CLI mode requires a GUI window.
@@ -149,17 +139,6 @@ mod tests {
         cli
     }
 
-    #[allow(dead_code)]
-    fn make_cli_with_silent() -> Cli {
-        make_cli_screen()
-    }
-
-    fn make_config_with_post_capture(value: &str) -> Config {
-        let mut config = Config::default();
-        config.general.post_capture = value.into();
-        config
-    }
-
     // ------------------------------------------------------------------
     // determine_output_action priority tests
     // ------------------------------------------------------------------
@@ -198,32 +177,12 @@ mod tests {
     }
 
     #[test]
-    fn test_config_default_save() {
+    fn test_default_is_save() {
         let cli = make_cli_screen();
-        let config = make_config_with_post_capture("save");
+        let config = Config::default();
         assert!(matches!(
             determine_output_action(&cli, &config),
             OutputAction::Save(None)
-        ));
-    }
-
-    #[test]
-    fn test_config_default_clipboard() {
-        let cli = make_cli_screen();
-        let config = make_config_with_post_capture("clipboard");
-        assert!(matches!(
-            determine_output_action(&cli, &config),
-            OutputAction::Clipboard
-        ));
-    }
-
-    #[test]
-    fn test_config_default_pipe() {
-        let cli = make_cli_screen();
-        let config = make_config_with_post_capture("pipe");
-        assert!(matches!(
-            determine_output_action(&cli, &config),
-            OutputAction::Pipe
         ));
     }
 

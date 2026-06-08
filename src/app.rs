@@ -87,13 +87,13 @@ impl WlsnapApp {
         app
     }
 
-    /// Determine the output action based on CLI flags and config.
+    /// Determine the output action based on CLI flags.
     ///
     /// Priority (highest first):
     /// 1. `--stdout`  → Pipe
     /// 2. `--clipboard` → Clipboard
     /// 3. `-o PATH` → Save(Some(path))
-    /// 4. `general.post_capture` config → default action
+    /// 4. Default → Save(None)
     fn determine_output_action(&self) -> OutputAction {
         let cli = self
             .cli
@@ -110,18 +110,7 @@ impl WlsnapApp {
             return OutputAction::Save(Some(path.clone()));
         }
 
-        Self::parse_post_capture_config(&self.config.general.post_capture)
-    }
-
-    /// Parse the `general.post_capture` config string into an `OutputAction`.
-    fn parse_post_capture_config(value: &str) -> OutputAction {
-        match value.to_lowercase().as_str() {
-            "save" => OutputAction::Save(None),
-            "clipboard" => OutputAction::Clipboard,
-            "pipe" => OutputAction::Pipe,
-            "edit" | "ask" => OutputAction::Save(None),
-            _ => OutputAction::Save(None),
-        }
+        OutputAction::Save(None)
     }
 
     /// Spawn an async tokio task that performs the screenshot capture.
@@ -310,10 +299,6 @@ mod tests {
         WlsnapApp::new_with_cli(Config::default(), cli)
     }
 
-    fn make_app_with_config(cli: Cli, config: Config) -> WlsnapApp {
-        WlsnapApp::new_with_cli(config, cli)
-    }
-
     #[test]
     fn test_app_new() {
         let config = Config::default();
@@ -418,41 +403,14 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_output_action_config_default_save() {
+    fn test_determine_output_action_default_is_save() {
         let cli = make_cli_with_stdout();
         let mut cli = cli;
         cli.stdout = false;
-        let mut config = Config::default();
-        config.general.post_capture = "save".into();
-        let app = make_app_with_config(cli, config);
+        let app = make_app_with_cli(cli);
         assert!(matches!(
             app.determine_output_action(),
-            OutputAction::Save(_)
+            OutputAction::Save(None)
         ));
-    }
-
-    #[test]
-    fn test_determine_output_action_config_default_clipboard() {
-        let cli = make_cli_with_stdout();
-        let mut cli = cli;
-        cli.stdout = false;
-        let mut config = Config::default();
-        config.general.post_capture = "clipboard".into();
-        let app = make_app_with_config(cli, config);
-        assert!(matches!(
-            app.determine_output_action(),
-            OutputAction::Clipboard
-        ));
-    }
-
-    #[test]
-    fn test_determine_output_action_config_default_pipe() {
-        let cli = make_cli_with_stdout();
-        let mut cli = cli;
-        cli.stdout = false;
-        let mut config = Config::default();
-        config.general.post_capture = "pipe".into();
-        let app = make_app_with_config(cli, config);
-        assert!(matches!(app.determine_output_action(), OutputAction::Pipe));
     }
 }

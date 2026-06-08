@@ -102,7 +102,6 @@ mod tests {
 
     fn make_config(tmp: &tempfile::TempDir, format: ImageFormat, quality: u8) -> GeneralConfig {
         GeneralConfig {
-            post_capture: "save".into(),
             save_dir: tmp.path().to_str().unwrap().into(),
             filename_template: "test".into(),
             format,
