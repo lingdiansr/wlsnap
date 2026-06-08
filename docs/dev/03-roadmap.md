@@ -11,7 +11,7 @@
 ```
 Phase 1 (MVP)        Phase 2 (兼容)        Phase 3 (进阶)        Phase 4 (Polish)
 ─────────────────────────────────────────────────────────────────────────────────
-基础骨架 ──► 截图闭环 ──► 编辑器 ──► 高级功能 │ Portal/GNOME │ ORB/EIS   │ 测试/打包
+基础骨架 ──► 截图闭环 ──► 编辑器 ──► 高级功能 │ Portal/GNOME │ ORB/EIS (Input) │ 测试/打包
                                            │ KDE 兼容     │ 自适应间隔 │
 ```
 
@@ -156,7 +156,7 @@ v1.0.0（M5 ── 生产就绪）:
 | 编号 | 任务 | 前置依赖 | 工作量 | 验收标准 |
 |------|------|---------|--------|---------|
 | T26 | ORB拼接：`capture/scrolling/orb.rs`（ORB特征点+RANSAC、Stitcher trait新实现） | T19 | 大 | 在重复内容页面（如表格、代码）上拼接成功率显著高于Column Sampling |
-| T27 | KDE EIS：`backend/kde_eis.rs`（实验性接口） | T3 | 大（研究性） | 在KDE上能绕过Portal直接截图 |
+| T27 | KDE EIS (Emulated Input Server)：`backend/kde_eis.rs`（实验性接口） | T3 | 大（研究性） | 在KDE上能绕过Portal直接截图 |
 | T28 | 自适应捕获间隔：根据帧间位移速度动态调整manual_capture_interval | T24 | 小 | 快速滚动时间隔缩短，慢速时间隔延长 |
 
 **并行策略**: T26 / T27 / T28 完全可并行。

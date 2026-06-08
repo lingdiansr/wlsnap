@@ -100,7 +100,7 @@ wlsnap/
     │   ├── ext_capture.rs       # ext-image-copy-capture-v1 实现
     │   ├── virtual_pointer.rs   # wlr-virtual-pointer 滚动注入
     │   ├── toplevel.rs          # wlr-foreign-toplevel / plasma-window-management
-    │   └── kde_eis.rs           # KWin EIS 实验性接口（Phase 3）
+    │   └── kde_eis.rs           # KWin EIS (Emulated Input Server) 实验性接口（Phase 3）
     │
     ├── capture/                 # 截图流程编排
     │   ├── mod.rs               # 截图请求/响应类型、工作流编排器
@@ -1223,7 +1223,7 @@ pub type Result<T> = std::result::Result<T, WlsnapError>;
 
 | 模块 | 交付内容 |
 |------|----------|
-| backend | `ext-image-copy-capture-v1` 作为 P0 自动启用；KDE EIS 实验 |
+| backend | `ext-image-copy-capture-v1` 作为 P0 自动启用；KDE EIS (Emulated Input Server) 实验 |
 | scrolling | ORB 特征点 + RANSAC 拼接算法（配置项） |
 | config | 手动滚动模式自适应捕获间隔 |
 
