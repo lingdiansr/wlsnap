@@ -116,7 +116,6 @@ Other:
 
 ```toml
 [general]
-post_capture = "save"          # save / clipboard / pipe / edit / ask
 save_dir = "{HOME}/Pictures/Screenshots"
 filename_template = "wlsnap_{date}_{time}_{mode}"
 format = "png"                 # png / jpeg / webp

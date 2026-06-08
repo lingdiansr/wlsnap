@@ -79,7 +79,6 @@ impl Config {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GeneralConfig {
-    pub post_capture: String,
     pub save_dir: String,
     pub filename_template: String,
     pub format: ImageFormat,
@@ -89,7 +88,6 @@ pub struct GeneralConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
-            post_capture: "save".into(),
             save_dir: DEFAULT_SAVE_DIR.into(),
             filename_template: DEFAULT_FILENAME_TEMPLATE.into(),
             format: ImageFormat::Png,

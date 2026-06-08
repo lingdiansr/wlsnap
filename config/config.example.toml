@@ -3,15 +3,6 @@
 # 首次启动时若配置文件不存在，wlsnap 会自动生成一份默认配置
 
 [general]
-# 截图后的默认操作
-# 可选值:
-#   "edit"      - 打开内置标注编辑器
-#   "save"      - 直接保存到 save_dir 指定目录
-#   "clipboard" - 复制到剪贴板
-#   "pipe"      - 输出到 stdout（供外部程序管道接收，如: wlsnap --area --stdout | xclip -t image/png）
-#   "ask"       - 每次截图后弹出选择对话框
-post_capture = "edit"
-
 # 截图保存目录
 # 支持占位符:
 #   {HOME}      - 用户主目录
