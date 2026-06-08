@@ -59,7 +59,13 @@ mod tests {
             ..Default::default()
         };
 
-        let path = dispatch(&dummy_image(), OutputAction::Save(None), &config, "test_mode").unwrap();
+        let path = dispatch(
+            &dummy_image(),
+            OutputAction::Save(None),
+            &config,
+            "test_mode",
+        )
+        .unwrap();
         assert!(path.exists());
         assert_eq!(path.extension().unwrap(), "png");
     }

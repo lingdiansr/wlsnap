@@ -20,8 +20,6 @@ pub struct Config {
     pub advanced: AdvancedConfig,
 }
 
-
-
 impl Config {
     /// 加载配置文件。若文件不存在，则创建默认配置并写入。
     pub fn load() -> Result<Self> {

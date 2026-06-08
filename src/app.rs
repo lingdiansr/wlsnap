@@ -186,7 +186,10 @@ impl eframe::App for WlsnapApp {
                     self.state = AppState::Idle;
                     self.output_dispatched = true;
 
-                    let action = self.pending_action.take().unwrap_or(OutputAction::Save(None));
+                    let action = self
+                        .pending_action
+                        .take()
+                        .unwrap_or(OutputAction::Save(None));
                     let general_config = &self.config.general;
 
                     match dispatch(&captured.image, action, general_config, &mode) {
@@ -405,7 +408,10 @@ mod tests {
     fn test_determine_output_action_output_flag_maps_to_save() {
         let cli = make_cli_with_output(PathBuf::from("/tmp/test.png"));
         let app = make_app_with_cli(cli);
-        assert!(matches!(app.determine_output_action(), OutputAction::Save(_)));
+        assert!(matches!(
+            app.determine_output_action(),
+            OutputAction::Save(_)
+        ));
     }
 
     #[test]
@@ -416,7 +422,10 @@ mod tests {
         let mut config = Config::default();
         config.general.post_capture = "save".into();
         let app = make_app_with_config(cli, config);
-        assert!(matches!(app.determine_output_action(), OutputAction::Save(_)));
+        assert!(matches!(
+            app.determine_output_action(),
+            OutputAction::Save(_)
+        ));
     }
 
     #[test]

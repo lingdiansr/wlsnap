@@ -89,10 +89,7 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
         if (logical_x - last_logical_x).abs() >= 0.001 {
             // New x position: save offset for previous group, start new group
             if last_logical_x != f64::NEG_INFINITY {
-                x_offsets.insert(
-                    (last_logical_x * 1000.0).round() as i64,
-                    current_x,
-                );
+                x_offsets.insert((last_logical_x * 1000.0).round() as i64, current_x);
                 current_x += max_w_at_x;
             }
             last_logical_x = logical_x;
@@ -104,10 +101,7 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
     }
     // Don't forget the last group
     if last_logical_x != f64::NEG_INFINITY {
-        x_offsets.insert(
-            (last_logical_x * 1000.0).round() as i64,
-            current_x,
-        );
+        x_offsets.insert((last_logical_x * 1000.0).round() as i64, current_x);
         current_x += max_w_at_x;
     }
 
@@ -117,10 +111,7 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
     for (logical_y, phys_h) in sorted_y {
         if (logical_y - last_logical_y).abs() >= 0.001 {
             if last_logical_y != f64::NEG_INFINITY {
-                y_offsets.insert(
-                    (last_logical_y * 1000.0).round() as i64,
-                    current_y,
-                );
+                y_offsets.insert((last_logical_y * 1000.0).round() as i64, current_y);
                 current_y += max_h_at_y;
             }
             last_logical_y = logical_y;
@@ -130,10 +121,7 @@ pub async fn capture_all_screens(overlay_cursor: bool) -> Result<CapturedImage> 
         }
     }
     if last_logical_y != f64::NEG_INFINITY {
-        y_offsets.insert(
-            (last_logical_y * 1000.0).round() as i64,
-            current_y,
-        );
+        y_offsets.insert((last_logical_y * 1000.0).round() as i64, current_y);
         current_y += max_h_at_y;
     }
 
@@ -248,7 +236,10 @@ mod tests {
             description: String::new(),
             logical_geometry: LogicalRect {
                 min: LogicalPoint { x: 0.0, y: 0.0 },
-                max: LogicalPoint { x: 1536.0, y: 864.0 },
+                max: LogicalPoint {
+                    x: 1536.0,
+                    y: 864.0,
+                },
             },
             physical_size: (1920, 1080),
             scale_factor: 1.25,
@@ -260,7 +251,10 @@ mod tests {
             description: String::new(),
             logical_geometry: LogicalRect {
                 min: LogicalPoint { x: 0.0, y: 864.0 },
-                max: LogicalPoint { x: 1440.0, y: 1764.0 },
+                max: LogicalPoint {
+                    x: 1440.0,
+                    y: 1764.0,
+                },
             },
             physical_size: (2880, 1800),
             scale_factor: 2.0,
@@ -289,8 +283,14 @@ mod tests {
         // Expected canvas: 2880 x 3528 (physical pixels)
         // width  = max(1920, 2880) = 2880
         // height = 0 + max(1080, 1728+1800) = 3528
-        assert_eq!(total_width, 2880, "canvas width should use physical coordinates");
-        assert_eq!(total_height, 3528, "canvas height should use physical coordinates");
+        assert_eq!(
+            total_width, 2880,
+            "canvas width should use physical coordinates"
+        );
+        assert_eq!(
+            total_height, 3528,
+            "canvas height should use physical coordinates"
+        );
 
         // Verify offsets
         let offset1_x = (phys_x1 - min_x).round() as i64;

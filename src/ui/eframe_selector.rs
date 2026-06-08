@@ -4,8 +4,8 @@
 //! This module provides [`EframeSelector`], a minimal interactive region picker
 //! rendered as a borderless egui window covering the target output.
 
-use egui::{Color32, FontId, Pos2, Rect, Stroke};
 use crate::platform::output_info::{LogicalPoint, LogicalRect, OutputInfo};
+use egui::{Color32, FontId, Pos2, Rect, Stroke};
 use std::sync::mpsc;
 
 /// Minimum side length (in logical pixels) for a selection to be considered valid.

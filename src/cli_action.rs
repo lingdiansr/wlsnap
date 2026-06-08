@@ -151,8 +151,6 @@ mod tests {
         make_cli_screen()
     }
 
-
-
     fn make_config_with_post_capture(value: &str) -> Config {
         let mut config = Config::default();
         config.general.post_capture = value.into();
@@ -167,7 +165,10 @@ mod tests {
     fn test_stdout_wins() {
         let cli = make_cli_with_stdout();
         let config = Config::default();
-        assert!(matches!(determine_output_action(&cli, &config), OutputAction::Pipe));
+        assert!(matches!(
+            determine_output_action(&cli, &config),
+            OutputAction::Pipe
+        ));
     }
 
     #[test]
@@ -175,7 +176,10 @@ mod tests {
         let cli = make_cli_with_clipboard();
         let config = Config::default();
         assert!(
-            matches!(determine_output_action(&cli, &config), OutputAction::Clipboard),
+            matches!(
+                determine_output_action(&cli, &config),
+                OutputAction::Clipboard
+            ),
             "clipboard should win over default save"
         );
     }
@@ -194,21 +198,30 @@ mod tests {
     fn test_config_default_save() {
         let cli = make_cli_screen();
         let config = make_config_with_post_capture("save");
-        assert!(matches!(determine_output_action(&cli, &config), OutputAction::Save(None)));
+        assert!(matches!(
+            determine_output_action(&cli, &config),
+            OutputAction::Save(None)
+        ));
     }
 
     #[test]
     fn test_config_default_clipboard() {
         let cli = make_cli_screen();
         let config = make_config_with_post_capture("clipboard");
-        assert!(matches!(determine_output_action(&cli, &config), OutputAction::Clipboard));
+        assert!(matches!(
+            determine_output_action(&cli, &config),
+            OutputAction::Clipboard
+        ));
     }
 
     #[test]
     fn test_config_default_pipe() {
         let cli = make_cli_screen();
         let config = make_config_with_post_capture("pipe");
-        assert!(matches!(determine_output_action(&cli, &config), OutputAction::Pipe));
+        assert!(matches!(
+            determine_output_action(&cli, &config),
+            OutputAction::Pipe
+        ));
     }
 
     // ------------------------------------------------------------------

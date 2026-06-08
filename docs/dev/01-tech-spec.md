@@ -118,7 +118,7 @@ src/
     wlr.rs              # wlr-screencopy 原生截图
     ext_capture.rs      # ext-image-copy-capture-v1
     virtual_pointer.rs  # wlr-virtual-pointer 滚动注入（Auto 模式）
-    kde_eis.rs          # KWin EIS 私有接口（可选实验性）
+    kde_eis.rs          # KWin EIS (Emulated Input Server) 私有接口（可选实验性）
     toplevel.rs         # foreign-toplevel 窗口枚举
   ui/
     app.rs              # egui 主应用状态
@@ -177,7 +177,7 @@ wayclip --scroll-manual # 手动长截图
 
 ### Phase 3：进阶优化
 - ext-image-copy-capture 自动探测，降低 wlroots 系延迟。
-- KDE KWin EIS 私有接口实验（若维护成本可控）。
+- KDE KWin EIS (Emulated Input Server) 私有接口实验（若维护成本可控）。
 - ORB 特征点拼接作为配置项（抗重复内容）。
 - GNOME restore token 静默授权优化。
 

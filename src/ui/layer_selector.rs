@@ -15,23 +15,26 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
+        Capability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Keysym},
         pointer::{PointerEvent, PointerEventKind, PointerHandler},
-        Capability, SeatHandler, SeatState,
     },
     shell::{
+        WaylandSurface,
         wlr_layer::{
             Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
             LayerSurfaceConfigure,
         },
-        WaylandSurface,
     },
-    shm::{slot::{Slot, SlotPool}, Shm, ShmHandler},
+    shm::{
+        Shm, ShmHandler,
+        slot::{Slot, SlotPool},
+    },
 };
 use wayland_client::{
+    Connection, QueueHandle,
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
-    Connection, QueueHandle,
 };
 
 use crate::platform::output_info::{LogicalPoint, LogicalRect};
@@ -178,19 +181,33 @@ impl LayerSelector {
 
         let buffer = self
             .pool
-            .create_buffer_in(slot_ref, width as i32, height as i32, stride, wl_shm::Format::Argb8888)
+            .create_buffer_in(
+                slot_ref,
+                width as i32,
+                height as i32,
+                stride,
+                wl_shm::Format::Argb8888,
+            )
             .expect("create buffer in slot");
         let canvas = self.pool.raw_data_mut(slot_ref);
 
         // Use tiny-skia to render the overlay.
-        render_selector(&mut canvas[..buf_size], width, height, self.drag_start, self.drag_current);
+        render_selector(
+            &mut canvas[..buf_size],
+            width,
+            height,
+            self.drag_start,
+            self.drag_current,
+        );
 
         // Damage entire surface and present.
         self.layer
             .wl_surface()
             .damage_buffer(0, 0, width as i32, height as i32);
         // No frame callback needed — we only redraw on user interaction.
-        buffer.attach_to(self.layer.wl_surface()).expect("buffer attach");
+        buffer
+            .attach_to(self.layer.wl_surface())
+            .expect("buffer attach");
         self.layer.commit();
 
         self.last_draw_time = Some(Instant::now());
@@ -281,7 +298,12 @@ fn render_selector(
     }
 
     // Hint text
-    draw_label(&mut pixmap, width as f32 / 2.0, height as f32 - 30.0, "Esc cancel | Drag to select");
+    draw_label(
+        &mut pixmap,
+        width as f32 / 2.0,
+        height as f32 - 30.0,
+        "Esc cancel | Drag to select",
+    );
 
     // Copy from pixmap (RGBA) to canvas (BGRA for Wayland ARGB8888)
     // tiny-skia stores as RGBA; Wayland ARGB8888 expects BGRA in memory.
@@ -383,7 +405,7 @@ fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
                 let out_a = a + dst_a * (1.0 - a);
                 if out_a > 0.0 {
                     let t = a / out_a;
-                    data[idx]     = (255.0 * t + data[idx] as f32 * (1.0 - t)) as u8;
+                    data[idx] = (255.0 * t + data[idx] as f32 * (1.0 - t)) as u8;
                     data[idx + 1] = (255.0 * t + data[idx + 1] as f32 * (1.0 - t)) as u8;
                     data[idx + 2] = (255.0 * t + data[idx + 2] as f32 * (1.0 - t)) as u8;
                     data[idx + 3] = (out_a * 255.0) as u8;
@@ -644,7 +666,9 @@ impl PointerHandler for LayerSelector {
                     }
                 }
                 Release { button, .. } => {
-                    if button == 272 && let Some(start) = self.drag_start {
+                    if button == 272
+                        && let Some(start) = self.drag_start
+                    {
                         let x1 = start.0.min(self.drag_current.0);
                         let y1 = start.1.min(self.drag_current.1);
                         let x2 = start.0.max(self.drag_current.0);
