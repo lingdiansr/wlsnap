@@ -89,7 +89,7 @@ pub struct GeneralConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
-            post_capture: "edit".into(),
+            post_capture: "save".into(),
             save_dir: DEFAULT_SAVE_DIR.into(),
             filename_template: DEFAULT_FILENAME_TEMPLATE.into(),
             format: ImageFormat::Png,
