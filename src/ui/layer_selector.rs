@@ -4,8 +4,10 @@
 //! The user drags to select a region; the selected rectangle is returned
 //! in logical coordinates.
 
-use std::num::NonZeroU32;
-use std::time::{Duration, Instant};
+use std::{
+    num::NonZeroU32,
+    time::{Duration, Instant},
+};
 
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -709,8 +711,9 @@ delegate_layer!(LayerSelector);
 delegate_registry!(LayerSelector);
 
 impl ProvidesRegistryState for LayerSelector {
+    registry_handlers![OutputState, SeatState];
+
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.registry_state
     }
-    registry_handlers![OutputState, SeatState];
 }

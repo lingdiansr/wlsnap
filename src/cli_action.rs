@@ -5,10 +5,12 @@
 
 use std::path::PathBuf;
 
-use crate::cli::Cli;
-use crate::config::Config;
-use crate::error::Result;
-use crate::output_manager::{OutputAction, dispatch};
+use crate::{
+    cli::Cli,
+    config::Config,
+    error::Result,
+    output_manager::{OutputAction, dispatch},
+};
 
 /// Determine the final `OutputAction` from CLI flags and config.
 ///
@@ -105,8 +107,9 @@ pub fn run_cli_capture(cli: &Cli, config: &Config) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn make_cli_screen() -> Cli {
         Cli {

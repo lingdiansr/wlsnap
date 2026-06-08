@@ -61,8 +61,9 @@ impl OutputTransform {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use image::Rgba;
+
+    use super::*;
 
     #[test]
     fn apply_dimensions_no_swap() {

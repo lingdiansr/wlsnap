@@ -1,9 +1,13 @@
-use smithay_client_toolkit::output::{OutputHandler, OutputState};
-use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
-use smithay_client_toolkit::{delegate_output, delegate_registry, registry_handlers};
+use smithay_client_toolkit::{
+    delegate_output, delegate_registry,
+    output::{OutputHandler, OutputState},
+    registry::{ProvidesRegistryState, RegistryState},
+    registry_handlers,
+};
 use tracing::{debug, warn};
-use wayland_client::protocol::wl_output::WlOutput;
-use wayland_client::{Connection, QueueHandle, globals::registry_queue_init};
+use wayland_client::{
+    Connection, QueueHandle, globals::registry_queue_init, protocol::wl_output::WlOutput,
+};
 
 use super::output_info::{LogicalPoint, LogicalRect, OutputInfo, OutputTransform};
 use crate::error::{Result, WlsnapError};
@@ -31,11 +35,11 @@ delegate_registry!(AppState);
 delegate_output!(AppState);
 
 impl ProvidesRegistryState for AppState {
+    registry_handlers!(OutputState);
+
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.registry_state
     }
-
-    registry_handlers!(OutputState);
 }
 
 /// Enumerate all connected Wayland outputs and return their metadata.

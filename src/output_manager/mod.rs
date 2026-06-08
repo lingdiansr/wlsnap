@@ -2,9 +2,9 @@ pub mod clipboard;
 pub mod pipe;
 pub mod save;
 
-use crate::config::GeneralConfig;
-use crate::error::Result;
 use std::path::PathBuf;
+
+use crate::{config::GeneralConfig, error::Result};
 
 #[derive(Debug, Clone)]
 pub enum OutputAction {
@@ -41,9 +41,10 @@ pub fn dispatch(
 
 #[cfg(test)]
 mod tests {
+    use image::RgbaImage;
+
     use super::*;
     use crate::config::{GeneralConfig, ImageFormat};
-    use image::RgbaImage;
 
     fn dummy_image() -> RgbaImage {
         RgbaImage::from_raw(2, 2, vec![0; 16]).unwrap()

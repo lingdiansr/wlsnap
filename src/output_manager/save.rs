@@ -1,8 +1,9 @@
-use crate::config::{GeneralConfig, ImageFormat, expand_placeholders};
-use crate::error::Result;
-use std::fs;
-use std::io::BufWriter;
-use std::path::PathBuf;
+use std::{fs, io::BufWriter, path::PathBuf};
+
+use crate::{
+    config::{GeneralConfig, ImageFormat, expand_placeholders},
+    error::Result,
+};
 
 /// Save an image to disk according to `config`.
 ///
@@ -84,21 +85,18 @@ pub fn save_image(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use image::RgbaImage;
+
+    use super::*;
 
     fn dummy_image() -> RgbaImage {
         // Non-uniform pixel data so compression quality differences matter.
-        RgbaImage::from_raw(
-            4,
-            4,
-            vec![
-                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255,
-                0, 255, 255, 255, 128, 128, 128, 255, 64, 64, 64, 255, 255, 255, 255, 255, 0, 0, 0,
-                255, 255, 128, 0, 255, 0, 128, 255, 255, 128, 0, 128, 255, 0, 255, 128, 255, 128,
-                128, 128, 255, 200, 200, 200, 255,
-            ],
-        )
+        RgbaImage::from_raw(4, 4, vec![
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255, 0,
+            255, 255, 255, 128, 128, 128, 255, 64, 64, 64, 255, 255, 255, 255, 255, 0, 0, 0, 255,
+            255, 128, 0, 255, 0, 128, 255, 255, 128, 0, 128, 255, 0, 255, 128, 255, 128, 128, 128,
+            255, 200, 200, 200, 255,
+        ])
         .unwrap()
     }
 

@@ -1,7 +1,11 @@
-use crate::constants::*;
-use crate::error::{Result, WlsnapError};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    constants::*,
+    error::{Result, WlsnapError},
+};
 
 /// 顶级配置结构
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

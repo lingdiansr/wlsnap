@@ -1,6 +1,8 @@
-use crate::error::Result;
-use image::RgbaImage;
 use std::io::{self, Write};
+
+use image::RgbaImage;
+
+use crate::error::Result;
 
 /// Encode the image as PNG and write it to stdout.
 pub fn write_to_stdout(image: &RgbaImage) -> Result<()> {

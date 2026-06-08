@@ -91,19 +91,17 @@ impl Color {
         b: 0,
         a: 255,
     };
-
-    pub const WHITE: Self = Color {
-        r: 255,
-        g: 255,
-        b: 255,
-        a: 255,
-    };
-
     pub const TRANSPARENT: Self = Color {
         r: 0,
         g: 0,
         b: 0,
         a: 0,
+    };
+    pub const WHITE: Self = Color {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
     };
 
     /// Parse a hex color string.
@@ -258,32 +256,23 @@ mod tests {
 
     #[test]
     fn color_constants() {
-        assert_eq!(
-            Color::BLACK,
-            Color {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 255
-            }
-        );
-        assert_eq!(
-            Color::WHITE,
-            Color {
-                r: 255,
-                g: 255,
-                b: 255,
-                a: 255
-            }
-        );
-        assert_eq!(
-            Color::TRANSPARENT,
-            Color {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 0
-            }
-        );
+        assert_eq!(Color::BLACK, Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255
+        });
+        assert_eq!(Color::WHITE, Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255
+        });
+        assert_eq!(Color::TRANSPARENT, Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0
+        });
     }
 }

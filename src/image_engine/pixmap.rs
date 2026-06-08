@@ -29,8 +29,9 @@ pub fn pixmap_to_rgba(pixmap: &tiny_skia::Pixmap) -> image::RgbaImage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use image::Rgba;
+
+    use super::*;
 
     #[test]
     fn pixmap_rgba_roundtrip_empty() {

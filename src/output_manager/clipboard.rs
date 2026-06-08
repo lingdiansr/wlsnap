@@ -1,6 +1,8 @@
-use crate::error::{Result, WlsnapError};
-use image::RgbaImage;
 use std::process::{Command, Stdio};
+
+use image::RgbaImage;
+
+use crate::error::{Result, WlsnapError};
 
 /// Copy an RGBA image to the system clipboard.
 /// On Linux Wayland, uses wl-copy which daemonizes to keep data alive.

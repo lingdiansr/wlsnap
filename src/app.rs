@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
-use wlsnap::capture::CapturedImage;
-use wlsnap::cli::Cli;
-use wlsnap::config::Config;
-use wlsnap::output_manager::{OutputAction, dispatch};
+use wlsnap::{
+    capture::CapturedImage,
+    cli::Cli,
+    config::Config,
+    output_manager::{OutputAction, dispatch},
+};
 
 /// 全局应用状态机
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,8 +242,9 @@ impl eframe::App for WlsnapApp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn make_cli_with_stdout() -> Cli {
         Cli {

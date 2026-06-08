@@ -1,11 +1,10 @@
+use smithay_client_toolkit::registry::RegistryState;
 use tracing::{debug, warn};
 use wayland_client::{
     Connection, Dispatch, QueueHandle,
     globals::{GlobalListContents, registry_queue_init},
     protocol::wl_registry::WlRegistry,
 };
-
-use smithay_client_toolkit::registry::RegistryState;
 
 // Wayland protocol interface names used for probing.
 const EXT_IMAGE_COPY_CAPTURE: &str = "ext_image_copy_capture_manager_v1";

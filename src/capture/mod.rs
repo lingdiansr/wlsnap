@@ -6,8 +6,9 @@
 pub mod output;
 pub mod region;
 
-use crate::platform::output_info::OutputInfo;
 use image::RgbaImage;
+
+use crate::platform::output_info::OutputInfo;
 
 /// A captured screenshot with metadata.
 #[derive(Debug, Clone)]

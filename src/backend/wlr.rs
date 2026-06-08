@@ -6,24 +6,30 @@
 use std::os::unix::io::AsFd;
 
 use image::RgbaImage;
-use smithay_client_toolkit::delegate_output;
-use smithay_client_toolkit::output::{OutputHandler, OutputState};
+use smithay_client_toolkit::{
+    delegate_output,
+    output::{OutputHandler, OutputState},
+};
 use tokio::task;
 use tracing::{debug, warn};
-use wayland_client::globals::{GlobalListContents, registry_queue_init};
-use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::protocol::{
-    wl_buffer::WlBuffer, wl_output::WlOutput, wl_shm::WlShm, wl_shm_pool::WlShmPool,
+use wayland_client::{
+    Connection, Dispatch, QueueHandle, WEnum,
+    globals::{GlobalListContents, registry_queue_init},
+    protocol::{
+        wl_buffer::WlBuffer, wl_output::WlOutput, wl_registry::WlRegistry, wl_shm::WlShm,
+        wl_shm_pool::WlShmPool,
+    },
 };
-use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1},
     zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
-use crate::error::{Result, WlsnapError};
-use crate::image_engine::transform::OutputTransform as ImageOutputTransform;
-use crate::platform::output_info::OutputInfo;
+use crate::{
+    error::{Result, WlsnapError},
+    image_engine::transform::OutputTransform as ImageOutputTransform,
+    platform::output_info::OutputInfo,
+};
 
 // ---------------------------------------------------------------------------
 // State

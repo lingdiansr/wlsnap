@@ -2,9 +2,7 @@ mod app;
 
 use app::WlsnapApp;
 use clap::Parser;
-use wlsnap::cli::Cli;
-use wlsnap::cli_action;
-use wlsnap::config::Config;
+use wlsnap::{cli::Cli, cli_action, config::Config};
 
 fn main() -> eframe::Result {
     // 1. Initialize tracing

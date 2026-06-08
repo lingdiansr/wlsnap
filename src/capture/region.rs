@@ -1,7 +1,9 @@
 //! Region selection parameter validation.
 
-use crate::error::{Result, WlsnapError};
-use crate::platform::output_info::{LogicalPoint, LogicalRect, OutputInfo};
+use crate::{
+    error::{Result, WlsnapError},
+    platform::output_info::{LogicalPoint, LogicalRect, OutputInfo},
+};
 
 /// Validate that a region is within the bounds of the given output.
 /// Returns an error if the region is empty, negative-sized, or outside the output.

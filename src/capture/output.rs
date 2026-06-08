@@ -1,12 +1,14 @@
 //! Single-output and multi-output capture orchestration.
 
-use crate::backend::wlr;
-use crate::capture::{CapturedImage, current_output};
-use crate::error::{Result, WlsnapError};
-use crate::platform::output_info::OutputInfo;
-use crate::platform::wayland;
 use image::RgbaImage;
 use wayland_client::Connection;
+
+use crate::{
+    backend::wlr,
+    capture::{CapturedImage, current_output},
+    error::{Result, WlsnapError},
+    platform::{output_info::OutputInfo, wayland},
+};
 
 /// Capture the current pointer output (single screen).
 ///
