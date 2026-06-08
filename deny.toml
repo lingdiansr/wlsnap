@@ -35,3 +35,9 @@ unknown-git = "warn"
 [advisories]
 version = 2
 yanked = "warn"
+
+# Ignore unmaintained crate warnings for dependencies we don't directly control.
+# These are transitive deps of egui/eframe; we monitor upstream for updates.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but still functional; tracked by egui/eframe upstream" },
+]
