@@ -74,62 +74,141 @@ pub fn get_focused_output_name() -> Option<String> {
 
 /// Query Niri's focused output via IPC.
 fn niri_focused_output() -> Option<String> {
-    let output = std::process::Command::new("niri")
+    let output = match std::process::Command::new("niri")
         .args(["msg", "-j", "focused-output"])
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::debug!("niri msg command failed: {}", e);
+            return None;
+        }
+    };
 
     if !output.status.success() {
+        tracing::debug!("niri msg exited with status: {:?}", output.status);
         return None;
     }
 
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    json.get("name")?.as_str().map(String::from)
+    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::debug!("niri msg JSON parse failed: {}", e);
+            return None;
+        }
+    };
+
+    json.get("name")
+        .and_then(|v| v.as_str().map(String::from))
+        .or_else(|| {
+            tracing::debug!("niri msg response missing 'name' field: {}", json);
+            None
+        })
 }
 
 /// Query Hyprland's focused monitor via IPC.
 fn hyprland_focused_output() -> Option<String> {
-    let output = std::process::Command::new("hyprctl")
+    let output = match std::process::Command::new("hyprctl")
         .args(["monitors", "-j"])
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::debug!("hyprctl command failed: {}", e);
+            return None;
+        }
+    };
 
     if !output.status.success() {
+        tracing::debug!("hyprctl exited with status: {:?}", output.status);
         return None;
     }
 
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    let monitors = json.as_array()?;
+    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::debug!("hyprctl JSON parse failed: {}", e);
+            return None;
+        }
+    };
+
+    let monitors = match json.as_array() {
+        Some(a) => a,
+        None => {
+            tracing::debug!("hyprctl response is not an array: {}", json);
+            return None;
+        }
+    };
 
     for monitor in monitors {
-        if monitor.get("focused")?.as_bool()? {
-            return monitor.get("name")?.as_str().map(String::from);
+        if monitor.get("focused").and_then(|v| v.as_bool()) == Some(true) {
+            return monitor
+                .get("name")
+                .and_then(|v| v.as_str().map(String::from))
+                .or_else(|| {
+                    tracing::debug!("hyprctl monitor missing 'name' field: {}", monitor);
+                    None
+                });
         }
     }
 
+    tracing::debug!(
+        "hyprctl: no focused monitor found in {} monitors",
+        monitors.len()
+    );
     None
 }
 
 /// Query Sway's focused output via IPC.
 fn sway_focused_output() -> Option<String> {
-    let output = std::process::Command::new("swaymsg")
+    let output = match std::process::Command::new("swaymsg")
         .args(["-t", "get_outputs"])
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::debug!("swaymsg command failed: {}", e);
+            return None;
+        }
+    };
 
     if !output.status.success() {
+        tracing::debug!("swaymsg exited with status: {:?}", output.status);
         return None;
     }
 
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    let outputs = json.as_array()?;
+    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::debug!("swaymsg JSON parse failed: {}", e);
+            return None;
+        }
+    };
+
+    let outputs = match json.as_array() {
+        Some(a) => a,
+        None => {
+            tracing::debug!("swaymsg response is not an array: {}", json);
+            return None;
+        }
+    };
 
     for out in outputs {
-        if out.get("focused")?.as_bool()? {
-            return out.get("name")?.as_str().map(String::from);
+        if out.get("focused").and_then(|v| v.as_bool()) == Some(true) {
+            return out
+                .get("name")
+                .and_then(|v| v.as_str().map(String::from))
+                .or_else(|| {
+                    tracing::debug!("swaymsg output missing 'name' field: {}", out);
+                    None
+                });
         }
     }
 
+    tracing::debug!(
+        "swaymsg: no focused output found in {} outputs",
+        outputs.len()
+    );
     None
 }
 
@@ -214,8 +293,8 @@ pub fn enumerate_outputs() -> Result<Vec<OutputInfo>> {
         let transform = OutputTransform::from(info.transform);
 
         debug!(
-            "Detected output '{}' ({}) at {:?}x{:?}, scale={}",
-            name, description, logical_geometry.min.x, logical_geometry.min.y, info.scale_factor
+            "Detected output '{}' ({}) logical={:?} physical={:?} scale={}",
+            name, description, logical_geometry, physical_size, info.scale_factor
         );
 
         outputs.push(OutputInfo {

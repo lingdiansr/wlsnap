@@ -515,8 +515,17 @@ impl LayerShellHandler for LayerSelector {
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
+        let old_w = self.width;
+        let old_h = self.height;
         self.width = NonZeroU32::new(configure.new_size.0).map_or(256, NonZeroU32::get);
         self.height = NonZeroU32::new(configure.new_size.1).map_or(256, NonZeroU32::get);
+        tracing::debug!(
+            "layer_selector configure: {}x{} → {}x{}",
+            old_w,
+            old_h,
+            self.width,
+            self.height
+        );
         self.draw(qh);
     }
 }
@@ -679,11 +688,32 @@ impl PointerHandler for LayerSelector {
                         let w = x2 - x1;
                         let h = y2 - y1;
 
+                        tracing::debug!(
+                            "layer_selector release: start=({:.1},{:.1}) current=({:.1},{:.1}) rect=({:.1},{:.1}) w={:.1} h={:.1}",
+                            start.0,
+                            start.1,
+                            self.drag_current.0,
+                            self.drag_current.1,
+                            x1,
+                            y1,
+                            w,
+                            h
+                        );
+
                         if w >= MIN_SELECTION_SIZE && h >= MIN_SELECTION_SIZE {
                             self.selected_region = Some(LogicalRect {
                                 min: LogicalPoint { x: x1, y: y1 },
                                 max: LogicalPoint { x: x2, y: y2 },
                             });
+                            tracing::debug!(
+                                "layer_selector: saved region min=({:.1},{:.1}) max=({:.1},{:.1})",
+                                x1,
+                                y1,
+                                x2,
+                                y2
+                            );
+                        } else {
+                            tracing::debug!("layer_selector: region too small, discarded");
                         }
                         self.exit = true;
                     }

@@ -120,7 +120,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for CaptureState {
             } => match format {
                 WEnum::Value(fmt) => {
                     debug!(
-                        "screencopy buffer: {:?} {}x{} stride={}",
+                        "screencopy buffer: format={:?} width={} height={} stride={}",
                         fmt, width, height, stride
                     );
                     state.frame_state.buffer_info = Some(BufferInfo {
@@ -288,12 +288,21 @@ fn capture_output_blocking(
 
     // Map the SHM file and convert pixels.
     let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    debug!(
+        "screencopy capture for '{}': buffer={}x{} transform={:?}",
+        output.name, buffer_info.width, buffer_info.height, output.transform
+    );
     let mut img = bgra_to_rgba(
         &mmap,
         buffer_info.width,
         buffer_info.height,
         buffer_info.stride,
         fix_alpha,
+    );
+    debug!(
+        "screencopy after bgra_to_rgba: {}x{}",
+        img.width(),
+        img.height()
     );
 
     // Apply output transform if necessary.
@@ -316,6 +325,11 @@ fn capture_output_blocking(
         }
     };
     img = transform.apply_to_image(&img);
+    debug!(
+        "screencopy after transform: {}x{}",
+        img.width(),
+        img.height()
+    );
 
     // Clean up Wayland objects.
     frame.destroy();

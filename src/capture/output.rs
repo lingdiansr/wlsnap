@@ -10,14 +10,32 @@ use crate::{
     platform::{output_info::OutputInfo, wayland},
 };
 
-/// Capture the current pointer output (single screen).
+/// Capture a specific output.
+///
+/// 1. Connect to Wayland via `Connection::connect_to_env()`
+/// 2. Call `wlr::capture_output(conn, &output, overlay_cursor)`
+/// 3. Return `CapturedImage`
+pub async fn capture_specific_output(
+    output: &OutputInfo,
+    overlay_cursor: bool,
+) -> Result<CapturedImage> {
+    let conn =
+        Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
+
+    let image = wlr::capture_output(&conn, output, overlay_cursor).await?;
+
+    Ok(CapturedImage {
+        image,
+        source_output: output.clone(),
+    })
+}
+
+/// Capture the current focused output (single screen).
 ///
 /// 1. Enumerate outputs via `wayland::enumerate_outputs()`
-/// 2. Query pointer position via `wayland::get_pointer_position()`
-/// 3. Determine current output via `capture::current_output()` (pointer fallback to first)
-/// 4. Connect to Wayland via `Connection::connect_to_env()`
-/// 5. Call `wlr::capture_output(conn, &output, overlay_cursor)`
-/// 6. Return `CapturedImage`
+/// 2. Find the focused output via compositor IPC, fall back to first output
+/// 3. Call `capture_specific_output()`
+/// 4. Return `CapturedImage`
 pub async fn capture_current_screen(overlay_cursor: bool) -> Result<CapturedImage> {
     let outputs = wayland::enumerate_outputs()?;
 
@@ -33,15 +51,7 @@ pub async fn capture_current_screen(overlay_cursor: bool) -> Result<CapturedImag
     }
     .ok_or(WlsnapError::NoOutputDetected)?;
 
-    let conn =
-        Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
-
-    let image = wlr::capture_output(&conn, &output, overlay_cursor).await?;
-
-    Ok(CapturedImage {
-        image,
-        source_output: output,
-    })
+    capture_specific_output(&output, overlay_cursor).await
 }
 
 /// Capture all outputs and stitch them into a single image.
