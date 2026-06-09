@@ -42,6 +42,180 @@ impl ProvidesRegistryState for AppState {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Focused output detection (compositor-specific IPC)
+// ---------------------------------------------------------------------------
+
+/// Try to get the focused output name using compositor-specific IPC.
+///
+/// Priority:
+/// 1. Niri: `niri msg -j focused-output`
+/// 2. Hyprland: `hyprctl monitors -j` (find focused monitor)
+/// 3. Sway: `swaymsg -t get_outputs` (find focused output)
+/// 4. None: could not detect
+pub fn get_focused_output_name() -> Option<String> {
+    // Try Niri first
+    if let Some(name) = niri_focused_output() {
+        return Some(name);
+    }
+
+    // Try Hyprland
+    if let Some(name) = hyprland_focused_output() {
+        return Some(name);
+    }
+
+    // Try Sway
+    if let Some(name) = sway_focused_output() {
+        return Some(name);
+    }
+
+    None
+}
+
+/// Query Niri's focused output via IPC.
+fn niri_focused_output() -> Option<String> {
+    let output = match std::process::Command::new("niri")
+        .args(["msg", "-j", "focused-output"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::debug!("niri msg command failed: {}", e);
+            return None;
+        }
+    };
+
+    if !output.status.success() {
+        tracing::debug!("niri msg exited with status: {:?}", output.status);
+        return None;
+    }
+
+    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::debug!("niri msg JSON parse failed: {}", e);
+            return None;
+        }
+    };
+
+    json.get("name")
+        .and_then(|v| v.as_str().map(String::from))
+        .or_else(|| {
+            tracing::debug!("niri msg response missing 'name' field: {}", json);
+            None
+        })
+}
+
+/// Query Hyprland's focused monitor via IPC.
+fn hyprland_focused_output() -> Option<String> {
+    let output = match std::process::Command::new("hyprctl")
+        .args(["monitors", "-j"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::debug!("hyprctl command failed: {}", e);
+            return None;
+        }
+    };
+
+    if !output.status.success() {
+        tracing::debug!("hyprctl exited with status: {:?}", output.status);
+        return None;
+    }
+
+    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::debug!("hyprctl JSON parse failed: {}", e);
+            return None;
+        }
+    };
+
+    let monitors = match json.as_array() {
+        Some(a) => a,
+        None => {
+            tracing::debug!("hyprctl response is not an array: {}", json);
+            return None;
+        }
+    };
+
+    for monitor in monitors {
+        if monitor.get("focused").and_then(|v| v.as_bool()) == Some(true) {
+            return monitor
+                .get("name")
+                .and_then(|v| v.as_str().map(String::from))
+                .or_else(|| {
+                    tracing::debug!("hyprctl monitor missing 'name' field: {}", monitor);
+                    None
+                });
+        }
+    }
+
+    tracing::debug!(
+        "hyprctl: no focused monitor found in {} monitors",
+        monitors.len()
+    );
+    None
+}
+
+/// Query Sway's focused output via IPC.
+fn sway_focused_output() -> Option<String> {
+    let output = match std::process::Command::new("swaymsg")
+        .args(["-t", "get_outputs"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::debug!("swaymsg command failed: {}", e);
+            return None;
+        }
+    };
+
+    if !output.status.success() {
+        tracing::debug!("swaymsg exited with status: {:?}", output.status);
+        return None;
+    }
+
+    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::debug!("swaymsg JSON parse failed: {}", e);
+            return None;
+        }
+    };
+
+    let outputs = match json.as_array() {
+        Some(a) => a,
+        None => {
+            tracing::debug!("swaymsg response is not an array: {}", json);
+            return None;
+        }
+    };
+
+    for out in outputs {
+        if out.get("focused").and_then(|v| v.as_bool()) == Some(true) {
+            return out
+                .get("name")
+                .and_then(|v| v.as_str().map(String::from))
+                .or_else(|| {
+                    tracing::debug!("swaymsg output missing 'name' field: {}", out);
+                    None
+                });
+        }
+    }
+
+    tracing::debug!(
+        "swaymsg: no focused output found in {} outputs",
+        outputs.len()
+    );
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Output enumeration
+// ---------------------------------------------------------------------------
+
 /// Enumerate all connected Wayland outputs and return their metadata.
 ///
 /// If `WAYLAND_DISPLAY` is not set (i.e. not running under Wayland), returns an empty
@@ -119,8 +293,8 @@ pub fn enumerate_outputs() -> Result<Vec<OutputInfo>> {
         let transform = OutputTransform::from(info.transform);
 
         debug!(
-            "Detected output '{}' ({}) at {:?}x{:?}, scale={}",
-            name, description, logical_geometry.min.x, logical_geometry.min.y, info.scale_factor
+            "Detected output '{}' ({}) logical={:?} physical={:?} scale={}",
+            name, description, logical_geometry, physical_size, info.scale_factor
         );
 
         outputs.push(OutputInfo {

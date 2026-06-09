@@ -2,7 +2,7 @@
 
 use crate::{
     error::{Result, WlsnapError},
-    platform::output_info::{LogicalPoint, LogicalRect, OutputInfo},
+    platform::output_info::{LogicalRect, OutputInfo},
 };
 
 /// Validate that a region is within the bounds of the given output.
@@ -30,16 +30,6 @@ pub fn validate_region(region: LogicalRect, output: &OutputInfo) -> Result<Logic
     Ok(region)
 }
 
-/// Convert a region from logical coordinates to physical pixel coordinates
-/// using the output's scale_factor.
-pub fn region_to_physical(region: &LogicalRect, scale_factor: f64) -> (u32, u32, u32, u32) {
-    let x = (region.min.x * scale_factor).round() as u32;
-    let y = (region.min.y * scale_factor).round() as u32;
-    let width = ((region.max.x - region.min.x) * scale_factor).round() as u32;
-    let height = ((region.max.y - region.min.y) * scale_factor).round() as u32;
-    (x, y, width, height)
-}
-
 /// Crop a captured image to the specified region.
 /// The region is in logical coordinates relative to the output's logical_geometry.
 pub fn crop_image(
@@ -47,55 +37,76 @@ pub fn crop_image(
     region: &LogicalRect,
     output: &OutputInfo,
 ) -> image::RgbaImage {
-    let (x, y, width, height) = region_to_physical(region, output.scale_factor);
-
     let img_w = image.width();
     let img_h = image.height();
+
+    // Compute the actual scale ratio from the captured image size vs logical size.
+    // This handles fractional scaling where output.scale_factor may not match
+    // the actual physical/logical ratio.
+    let log_w = output.logical_geometry.max.x - output.logical_geometry.min.x;
+    let log_h = output.logical_geometry.max.y - output.logical_geometry.min.y;
+    let scale_x = if log_w > 0.0 {
+        img_w as f64 / log_w
+    } else {
+        output.scale_factor
+    };
+    let scale_y = if log_h > 0.0 {
+        img_h as f64 / log_h
+    } else {
+        output.scale_factor
+    };
+
+    let x = (region.min.x * scale_x).round() as u32;
+    let y = (region.min.y * scale_y).round() as u32;
+    let width = ((region.max.x - region.min.x) * scale_x).round() as u32;
+    let height = ((region.max.y - region.min.y) * scale_y).round() as u32;
+
+    tracing::debug!(
+        "crop_image: region={:?} log={:.1}x{:.1} img={}x{} scale_x={:.3} scale_y={:.3} → physical x={}, y={}, w={}, h={}",
+        region,
+        log_w,
+        log_h,
+        img_w,
+        img_h,
+        scale_x,
+        scale_y,
+        x,
+        y,
+        width,
+        height
+    );
 
     // Clamp to image bounds to avoid panics
     let x = x.min(img_w);
     let y = y.min(img_h);
-    let width = width.min(img_w - x);
-    let height = height.min(img_h - y);
+    let width = width.min(img_w.saturating_sub(x));
+    let height = height.min(img_h.saturating_sub(y));
 
-    image::imageops::crop_imm(image, x, y, width, height).to_image()
-}
+    tracing::debug!(
+        "crop_image after clamp: x={}, y={}, w={}, h={}",
+        x,
+        y,
+        width,
+        height
+    );
 
-/// Parse a region coordinate string in the format "x,y,w,h".
-///
-/// Returns a `LogicalRect` with the parsed coordinates.
-/// All values are in logical pixels.
-pub fn parse_region_arg(s: &str) -> Result<LogicalRect> {
-    let parts: Vec<&str> = s.split(',').collect();
-    if parts.len() != 4 {
-        return Err(WlsnapError::Region(
-            "region format must be 'x,y,w,h'".into(),
-        ));
+    if width == 0 || height == 0 {
+        tracing::warn!(
+            "Crop region results in zero-size image: x={}, y={}, w={}, h={}; image={}x{}",
+            x,
+            y,
+            width,
+            height,
+            img_w,
+            img_h
+        );
+        // Return empty image of the same type to avoid downstream panics
+        return image::RgbaImage::new(1, 1);
     }
 
-    let parse = |idx: usize, name: &str| -> Result<f64> {
-        parts[idx]
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| WlsnapError::Region(format!("invalid {} in region", name)))
-    };
-
-    let x = parse(0, "x")?;
-    let y = parse(1, "y")?;
-    let w = parse(2, "width")?;
-    let h = parse(3, "height")?;
-
-    if w <= 0.0 {
-        return Err(WlsnapError::Region("region width must be positive".into()));
-    }
-    if h <= 0.0 {
-        return Err(WlsnapError::Region("region height must be positive".into()));
-    }
-
-    Ok(LogicalRect {
-        min: LogicalPoint { x, y },
-        max: LogicalPoint { x: x + w, y: y + h },
-    })
+    let result = image::imageops::crop_imm(image, x, y, width, height).to_image();
+    tracing::debug!("crop_image result: {}x{}", result.width(), result.height());
+    result
 }
 
 #[cfg(test)]
@@ -187,37 +198,6 @@ mod tests {
     }
 
     #[test]
-    fn region_to_physical_scale_1() {
-        let region = LogicalRect {
-            min: LogicalPoint { x: 10.0, y: 20.0 },
-            max: LogicalPoint { x: 110.0, y: 120.0 },
-        };
-        assert_eq!(region_to_physical(&region, 1.0), (10, 20, 100, 100));
-    }
-
-    #[test]
-    fn region_to_physical_scale_2() {
-        let region = LogicalRect {
-            min: LogicalPoint { x: 10.0, y: 20.0 },
-            max: LogicalPoint { x: 110.0, y: 120.0 },
-        };
-        assert_eq!(region_to_physical(&region, 2.0), (20, 40, 200, 200));
-    }
-
-    #[test]
-    fn region_to_physical_scale_1_5() {
-        let region = LogicalRect {
-            min: LogicalPoint { x: 10.0, y: 20.0 },
-            max: LogicalPoint { x: 110.0, y: 120.0 },
-        };
-        let (x, y, w, h) = region_to_physical(&region, 1.5);
-        assert_eq!(x, 15);
-        assert_eq!(y, 30);
-        assert_eq!(w, 150);
-        assert_eq!(h, 150);
-    }
-
-    #[test]
     fn crop_image_basic() {
         let mut img = image::RgbaImage::new(100, 100);
         img.put_pixel(10, 20, image::Rgba([255, 0, 0, 255]));
@@ -263,31 +243,5 @@ mod tests {
 
         let cropped = crop_image(&img, &region, &output);
         assert_eq!(cropped.dimensions(), (10, 10));
-    }
-
-    #[test]
-    fn parse_region_arg_valid() {
-        let region = parse_region_arg("100,200,500,400").unwrap();
-        assert_eq!(region.min.x, 100.0);
-        assert_eq!(region.min.y, 200.0);
-        assert_eq!(region.max.x, 600.0);
-        assert_eq!(region.max.y, 600.0);
-    }
-
-    #[test]
-    fn parse_region_arg_invalid_format() {
-        assert!(parse_region_arg("100,200").is_err());
-        assert!(parse_region_arg("100,200,500").is_err());
-        assert!(parse_region_arg("").is_err());
-    }
-
-    #[test]
-    fn parse_region_arg_invalid_number() {
-        assert!(parse_region_arg("a,200,500,400").is_err());
-    }
-
-    #[test]
-    fn parse_region_arg_zero_width() {
-        assert!(parse_region_arg("100,200,0,400").is_err());
     }
 }

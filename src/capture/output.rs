@@ -5,31 +5,53 @@ use wayland_client::Connection;
 
 use crate::{
     backend::wlr,
-    capture::{CapturedImage, current_output},
+    capture::CapturedImage,
     error::{Result, WlsnapError},
     platform::{output_info::OutputInfo, wayland},
 };
 
-/// Capture the current pointer output (single screen).
+/// Capture a specific output.
 ///
-/// 1. Enumerate outputs via `wayland::enumerate_outputs()`
-/// 2. Determine current output via `capture::current_output()` (pointer fallback to first)
-/// 3. Connect to Wayland via `Connection::connect_to_env()`
-/// 4. Call `wlr::capture_output(conn, &output, overlay_cursor)`
-/// 5. Return `CapturedImage`
-pub async fn capture_current_screen(overlay_cursor: bool) -> Result<CapturedImage> {
-    let outputs = wayland::enumerate_outputs()?;
-    let output = current_output(&outputs, None).ok_or(WlsnapError::NoOutputDetected)?;
-
+/// 1. Connect to Wayland via `Connection::connect_to_env()`
+/// 2. Call `wlr::capture_output(conn, &output, overlay_cursor)`
+/// 3. Return `CapturedImage`
+pub async fn capture_specific_output(
+    output: &OutputInfo,
+    overlay_cursor: bool,
+) -> Result<CapturedImage> {
     let conn =
         Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
 
-    let image = wlr::capture_output(&conn, &output, overlay_cursor).await?;
+    let image = wlr::capture_output(&conn, output, overlay_cursor).await?;
 
     Ok(CapturedImage {
         image,
-        source_output: output,
+        source_output: output.clone(),
     })
+}
+
+/// Capture the current focused output (single screen).
+///
+/// 1. Enumerate outputs via `wayland::enumerate_outputs()`
+/// 2. Find the focused output via compositor IPC, fall back to first output
+/// 3. Call `capture_specific_output()`
+/// 4. Return `CapturedImage`
+pub async fn capture_current_screen(overlay_cursor: bool) -> Result<CapturedImage> {
+    let outputs = wayland::enumerate_outputs()?;
+
+    // Try to find the focused output via compositor IPC, fall back to first output
+    let output = if let Some(focused_name) = wayland::get_focused_output_name() {
+        outputs
+            .iter()
+            .find(|o| o.name == focused_name)
+            .cloned()
+            .or_else(|| outputs.first().cloned())
+    } else {
+        outputs.first().cloned()
+    }
+    .ok_or(WlsnapError::NoOutputDetected)?;
+
+    capture_specific_output(&output, overlay_cursor).await
 }
 
 /// Capture all outputs and stitch them into a single image.

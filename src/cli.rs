@@ -45,10 +45,9 @@ pub struct CaptureMode {
     #[arg(short, long, visible_alias = "full-all")]
     pub all_screen: bool,
 
-    /// Capture a region. Without value: interactive selection.
-    /// With value: direct crop using "x,y,w,h" coordinates.
-    #[arg(short, long, value_name = "X,Y,W,H", num_args = 0..=1, default_missing_value = "")]
-    pub range: Option<String>,
+    /// Capture a region via interactive selection.
+    #[arg(short, long)]
+    pub range: bool,
 
     /// Capture a specific window (interactive, requires GUI)
     #[arg(long)]
@@ -73,7 +72,7 @@ impl CaptureMode {
             "screen"
         } else if self.all_screen {
             "all_screen"
-        } else if self.range.is_some() {
+        } else if self.range {
             "range"
         } else if self.window {
             "window"
@@ -97,7 +96,7 @@ mod tests {
     fn parse_screen_flag() {
         let cli = Cli::try_parse_from(["wlsnap", "--screen"]).unwrap();
         assert!(cli.mode.screen);
-        assert!(cli.mode.range.is_none());
+        assert!(!cli.mode.range);
         assert_eq!(cli.mode.selected_mode_name(), "screen");
     }
 
@@ -111,16 +110,15 @@ mod tests {
     #[test]
     fn parse_range_and_stdout() {
         let cli = Cli::try_parse_from(["wlsnap", "--range", "--stdout"]).unwrap();
-        // --range without value gives Some("") in clap
-        assert!(cli.mode.range.is_some());
+        assert!(cli.mode.range);
         assert!(cli.stdout);
         assert_eq!(cli.mode.selected_mode_name(), "range");
     }
 
     #[test]
     fn parse_range_short() {
-        let cli = Cli::try_parse_from(["wlsnap", "-r", "100,200,500,400"]).unwrap();
-        assert_eq!(cli.mode.range, Some("100,200,500,400".into()));
+        let cli = Cli::try_parse_from(["wlsnap", "-r"]).unwrap();
+        assert!(cli.mode.range);
         assert_eq!(cli.mode.selected_mode_name(), "range");
     }
 
