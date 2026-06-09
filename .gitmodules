@@ -4,3 +4,6 @@
 [submodule "refs/mark-shot"]
 	path = refs/mark-shot
 	url = https://github.com/jswysnemc/mark-shot.git
+[submodule "aur"]
+	path = aur
+	url = https://aur.archlinux.org/wlsnap-bin.git
