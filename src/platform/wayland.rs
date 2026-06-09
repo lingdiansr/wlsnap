@@ -46,6 +46,42 @@ impl ProvidesRegistryState for AppState {
 // Focused output detection (compositor-specific IPC)
 // ---------------------------------------------------------------------------
 
+/// Run a command with a timeout, returning its stdout if it succeeds.
+fn run_with_timeout(cmd: &str, args: &[&str], timeout_ms: u64) -> Option<Vec<u8>> {
+    let child = match std::process::Command::new(cmd)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::debug!("{} spawn failed: {}", cmd, e);
+            return None;
+        }
+    };
+
+    // Wait with timeout using a helper thread.
+    // The thread takes ownership of child; on timeout we cannot kill it
+    // from here, but the thread will continue until the process exits.
+    let result = std::thread::spawn(move || child.wait_with_output());
+    match result.join() {
+        Ok(Ok(output)) if output.status.success() => Some(output.stdout),
+        Ok(Ok(output)) => {
+            tracing::debug!("{} exited with status: {:?}", cmd, output.status);
+            None
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("{} wait failed: {}", cmd, e);
+            None
+        }
+        Err(_) => {
+            tracing::debug!("{} timed out after {}ms", cmd, timeout_ms);
+            None
+        }
+    }
+}
+
 /// Try to get the focused output name using compositor-specific IPC.
 ///
 /// Priority:
@@ -74,23 +110,9 @@ pub fn get_focused_output_name() -> Option<String> {
 
 /// Query Niri's focused output via IPC.
 fn niri_focused_output() -> Option<String> {
-    let output = match std::process::Command::new("niri")
-        .args(["msg", "-j", "focused-output"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::debug!("niri msg command failed: {}", e);
-            return None;
-        }
-    };
+    let stdout = run_with_timeout("niri", &["msg", "-j", "focused-output"], 2000)?;
 
-    if !output.status.success() {
-        tracing::debug!("niri msg exited with status: {:?}", output.status);
-        return None;
-    }
-
-    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+    let json: serde_json::Value = match serde_json::from_slice(&stdout) {
         Ok(j) => j,
         Err(e) => {
             tracing::debug!("niri msg JSON parse failed: {}", e);
@@ -108,23 +130,9 @@ fn niri_focused_output() -> Option<String> {
 
 /// Query Hyprland's focused monitor via IPC.
 fn hyprland_focused_output() -> Option<String> {
-    let output = match std::process::Command::new("hyprctl")
-        .args(["monitors", "-j"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::debug!("hyprctl command failed: {}", e);
-            return None;
-        }
-    };
+    let stdout = run_with_timeout("hyprctl", &["monitors", "-j"], 2000)?;
 
-    if !output.status.success() {
-        tracing::debug!("hyprctl exited with status: {:?}", output.status);
-        return None;
-    }
-
-    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+    let json: serde_json::Value = match serde_json::from_slice(&stdout) {
         Ok(j) => j,
         Err(e) => {
             tracing::debug!("hyprctl JSON parse failed: {}", e);
@@ -161,23 +169,9 @@ fn hyprland_focused_output() -> Option<String> {
 
 /// Query Sway's focused output via IPC.
 fn sway_focused_output() -> Option<String> {
-    let output = match std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::debug!("swaymsg command failed: {}", e);
-            return None;
-        }
-    };
+    let stdout = run_with_timeout("swaymsg", &["-t", "get_outputs"], 2000)?;
 
-    if !output.status.success() {
-        tracing::debug!("swaymsg exited with status: {:?}", output.status);
-        return None;
-    }
-
-    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+    let json: serde_json::Value = match serde_json::from_slice(&stdout) {
         Ok(j) => j,
         Err(e) => {
             tracing::debug!("swaymsg JSON parse failed: {}", e);

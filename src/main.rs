@@ -116,20 +116,23 @@ fn main() -> eframe::Result {
                     }
                 }
 
-                let output = matched_output
-                    .or_else(|| {
-                        let focused_name = wlsnap::platform::wayland::get_focused_output_name();
-                        tracing::debug!(
-                            "  size-match failed, trying focused_output={:?}",
-                            focused_name
-                        );
-                        if let Some(name) = focused_name {
-                            outputs.iter().find(|o| o.name == name).cloned()
-                        } else {
-                            outputs.first().cloned()
-                        }
-                    })
-                    .expect("No outputs available");
+                let output = matched_output.or_else(|| {
+                    let focused_name = wlsnap::platform::wayland::get_focused_output_name();
+                    tracing::debug!(
+                        "  size-match failed, trying focused_output={:?}",
+                        focused_name
+                    );
+                    if let Some(name) = focused_name {
+                        outputs.iter().find(|o| o.name == name).cloned()
+                    } else {
+                        outputs.first().cloned()
+                    }
+                });
+
+                let Some(output) = output else {
+                    tracing::error!("No outputs available for capture");
+                    return Ok(());
+                };
 
                 tracing::debug!(
                     "Capturing output: {} logical={:?} physical={:?} scale={}",

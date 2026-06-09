@@ -273,8 +273,15 @@ fn capture_output_blocking(
     // Ask the compositor to copy the frame into our buffer.
     frame.copy(&buffer);
 
-    // Block until ready or failed.
+    // Block until ready or failed, with a 5-second timeout.
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(5);
     while !state.frame_state.ready && !state.frame_state.failed {
+        if start.elapsed() >= timeout {
+            return Err(WlsnapError::WaylandConnect(
+                "screencopy timed out after 5 seconds".into(),
+            ));
+        }
         event_queue
             .blocking_dispatch(&mut state)
             .map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;

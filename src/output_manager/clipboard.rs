@@ -38,15 +38,23 @@ pub fn copy_to_clipboard(image: &RgbaImage) -> Result<()> {
         // stdin is dropped here, closing the pipe.
     }
 
-    // wl-copy daemonizes automatically; just give it a moment to start.
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // If wl-copy exited immediately, something went wrong.
-    match child.try_wait() {
-        Ok(Some(status)) if !status.success() => {
-            return Err(WlsnapError::Clipboard("wl-copy exited with error".into()));
+    // Wait for wl-copy to finish reading stdin.
+    // wl-copy daemonizes to keep clipboard data alive, but it must
+    // finish reading stdin before we drop our reference.
+    match child.wait() {
+        Ok(status) if !status.success() => {
+            return Err(WlsnapError::Clipboard(format!(
+                "wl-copy exited with status: {}",
+                status
+            )));
         }
-        _ => {}
+        Ok(_) => {}
+        Err(e) => {
+            return Err(WlsnapError::Clipboard(format!(
+                "wl-copy wait failed: {}",
+                e
+            )));
+        }
     }
 
     Ok(())
