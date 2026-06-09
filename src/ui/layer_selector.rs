@@ -145,15 +145,18 @@ impl LayerSelector {
     }
 
     /// Draw the overlay to the layer surface.
-    fn draw(&mut self, _qh: &QueueHandle<Self>) {
+    /// Returns false if drawing failed (e.g. pool exhausted), signalling
+    /// the caller to abort selection.
+    fn draw(&mut self, _qh: &QueueHandle<Self>) -> bool {
         let width = self.width;
         let height = self.height;
         let stride = width as i32 * 4;
         let buf_size = (stride * height as i32) as usize;
 
         // Ensure pool is big enough for two slots.
-        if self.pool.len() < buf_size * 2 {
-            let _ = self.pool.resize(buf_size * 2);
+        if self.pool.len() < buf_size * 2 && self.pool.resize(buf_size * 2).is_err() {
+            tracing::warn!("layer_selector: pool resize failed");
+            return false;
         }
 
         // Pre-allocate slots on first configure.
@@ -177,43 +180,51 @@ impl LayerSelector {
             self.slot_a.as_ref().or(self.slot_b.as_ref())
         };
         let Some(slot_ref) = slot_ref else {
-            return;
+            tracing::warn!("layer_selector: no slot available");
+            return false;
         };
         self.use_slot_b = !self.use_slot_b;
 
-        let buffer = self
-            .pool
-            .create_buffer_in(
-                slot_ref,
-                width as i32,
-                height as i32,
-                stride,
-                wl_shm::Format::Argb8888,
-            )
-            .expect("create buffer in slot");
+        let buffer = match self.pool.create_buffer_in(
+            slot_ref,
+            width as i32,
+            height as i32,
+            stride,
+            wl_shm::Format::Argb8888,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("layer_selector: create_buffer_in failed: {}", e);
+                return false;
+            }
+        };
         let canvas = self.pool.raw_data_mut(slot_ref);
 
         // Use tiny-skia to render the overlay.
-        render_selector(
+        if !render_selector(
             &mut canvas[..buf_size],
             width,
             height,
             self.drag_start,
             self.drag_current,
-        );
+        ) {
+            return false;
+        }
 
         // Damage entire surface and present.
         self.layer
             .wl_surface()
             .damage_buffer(0, 0, width as i32, height as i32);
         // No frame callback needed — we only redraw on user interaction.
-        buffer
-            .attach_to(self.layer.wl_surface())
-            .expect("buffer attach");
+        if buffer.attach_to(self.layer.wl_surface()).is_err() {
+            tracing::warn!("layer_selector: buffer attach failed");
+            return false;
+        }
         self.layer.commit();
 
         self.last_draw_time = Some(Instant::now());
         self.last_drawn_pos = Some(self.drag_current);
+        true
     }
 
     /// Check if we should redraw based on time and distance throttling.
@@ -244,16 +255,27 @@ impl LayerSelector {
 // ---------------------------------------------------------------------------
 
 /// Render the selector UI using tiny-skia.
+/// Returns false if rendering failed (e.g. allocation error).
 fn render_selector(
     canvas: &mut [u8],
     width: u32,
     height: u32,
     drag_start: Option<(f64, f64)>,
     drag_current: (f64, f64),
-) {
+) -> bool {
     use tiny_skia::{Color, Paint, Pixmap, Transform};
 
-    let mut pixmap = Pixmap::new(width, height).expect("pixmap");
+    let mut pixmap = match Pixmap::new(width, height) {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                "layer_selector: Pixmap allocation failed for {}x{}",
+                width,
+                height
+            );
+            return false;
+        }
+    };
     pixmap.fill(Color::from_rgba8(0, 0, 0, 128));
 
     if let Some(start) = drag_start {
@@ -324,20 +346,27 @@ fn render_selector(
             d.add(3).write(s.add(3).read());
         }
     }
+    true
 }
 
 /// Global fontdue font (lazily initialized).
-static FONT: std::sync::OnceLock<fontdue::Font> = std::sync::OnceLock::new();
+static FONT: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
 
-fn get_font() -> &'static fontdue::Font {
+fn get_font() -> Option<&'static fontdue::Font> {
     FONT.get_or_init(|| {
         let font_data = std::fs::read("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
             .or_else(|_| std::fs::read("/usr/share/fonts/TTF/DejaVuSansMono.ttf"))
             .or_else(|_| std::fs::read("/usr/share/fonts/dejavu/DejaVuSansMono.ttf"))
             .unwrap_or_else(|_| include_bytes!("../../assets/DejaVuSansMono.ttf").to_vec());
-        fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())
-            .expect("failed to load font")
+        match fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default()) {
+            Ok(font) => Some(font),
+            Err(e) => {
+                tracing::warn!("layer_selector: failed to load font: {}", e);
+                None
+            }
+        }
     })
+    .as_ref()
 }
 
 /// Cached glyph bitmaps keyed by (char, font_size_as_u8).
@@ -347,27 +376,36 @@ use std::sync::Mutex;
 type GlyphCache = HashMap<(char, u8), (fontdue::Metrics, Vec<u8>)>;
 static GLYPH_CACHE: Mutex<Option<GlyphCache>> = Mutex::new(None);
 
-fn get_glyph(ch: char, font_size: f32) -> (fontdue::Metrics, Vec<u8>) {
+fn get_glyph(ch: char, font_size: f32) -> Option<(fontdue::Metrics, Vec<u8>)> {
+    let font = get_font()?;
     let key = (ch, font_size as u8);
     let mut cache_lock = GLYPH_CACHE.lock().unwrap();
     let cache = cache_lock.get_or_insert_with(HashMap::new);
     if let Some(entry) = cache.get(&key) {
-        return entry.clone();
+        return Some(entry.clone());
     }
-    let font = get_font();
     let result = font.rasterize(ch, font_size);
     cache.insert(key, result.clone());
-    result
+    Some(result)
 }
 
 /// Draw a text label using fontdue + tiny-skia.
-fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
+/// Returns false if the font is unavailable.
+fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) -> bool {
     let font_size = 14.0;
+
+    // Check font availability first.
+    if get_font().is_none() {
+        return false;
+    }
 
     // Measure total width.
     let mut total_width = 0.0f32;
     for ch in text.chars() {
-        let metrics = get_glyph(ch, font_size).0;
+        let metrics = match get_glyph(ch, font_size) {
+            Some(g) => g.0,
+            None => continue,
+        };
         total_width += metrics.advance_width;
     }
 
@@ -375,7 +413,10 @@ fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
     let baseline = y + font_size * 0.35;
 
     for ch in text.chars() {
-        let (metrics, bitmap) = get_glyph(ch, font_size);
+        let (metrics, bitmap) = match get_glyph(ch, font_size) {
+            Some(g) => g,
+            None => continue,
+        };
         let gw = metrics.width;
         let gh = metrics.height;
         let gx = (cx + metrics.xmin as f32).round() as i32;
@@ -416,6 +457,7 @@ fn draw_label(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, text: &str) {
         }
         cx += metrics.advance_width;
     }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -526,7 +568,10 @@ impl LayerShellHandler for LayerSelector {
             self.width,
             self.height
         );
-        self.draw(qh);
+        if !self.draw(qh) {
+            self.exit = true;
+            self.cancelled = true;
+        }
     }
 }
 
@@ -664,8 +709,9 @@ impl PointerHandler for LayerSelector {
             match event.kind {
                 Enter { .. } | Motion { .. } => {
                     self.drag_current = event.position;
-                    if self.drag_start.is_some() && self.should_redraw() {
-                        self.draw(qh);
+                    if self.drag_start.is_some() && self.should_redraw() && !self.draw(qh) {
+                        self.exit = true;
+                        self.cancelled = true;
                     }
                 }
                 Press { button, .. } => {
@@ -673,7 +719,10 @@ impl PointerHandler for LayerSelector {
                     if button == 272 {
                         self.drag_start = Some(event.position);
                         self.drag_current = event.position;
-                        self.draw(qh);
+                        if !self.draw(qh) {
+                            self.exit = true;
+                            self.cancelled = true;
+                        }
                     }
                 }
                 Release { button, .. } => {
