@@ -70,9 +70,10 @@ impl EframeSelector {
             return None;
         }
 
-        // 2. Select output (first for now)
-        // TODO: pointer-based output selection
-        let output = outputs.into_iter().next().unwrap();
+        // 2. Select output based on pointer position
+        let pointer_pos = crate::platform::wayland::get_pointer_position().ok().flatten();
+        let output = crate::capture::current_output(&outputs, pointer_pos)
+            .unwrap_or_else(|| outputs.first().cloned().unwrap());
 
         let (tx, rx) = mpsc::channel();
 

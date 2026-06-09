@@ -1,12 +1,17 @@
 use smithay_client_toolkit::{
-    delegate_output, delegate_registry,
+    delegate_output, delegate_pointer, delegate_registry, delegate_seat,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
+    seat::{
+        Capability, SeatHandler, SeatState,
+        pointer::{PointerEvent, PointerEventKind, PointerHandler},
+    },
 };
 use tracing::{debug, warn};
 use wayland_client::{
-    Connection, QueueHandle, globals::registry_queue_init, protocol::wl_output::WlOutput,
+    Connection, QueueHandle, globals::registry_queue_init,
+    protocol::{wl_output::WlOutput, wl_pointer, wl_seat},
 };
 
 use super::output_info::{LogicalPoint, LogicalRect, OutputInfo, OutputTransform};
@@ -40,6 +45,136 @@ impl ProvidesRegistryState for AppState {
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.registry_state
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pointer position query
+// ---------------------------------------------------------------------------
+
+/// State for querying the current pointer position.
+struct PointerState {
+    registry_state: RegistryState,
+    seat_state: SeatState,
+    pointer: Option<wl_pointer::WlPointer>,
+    position: Option<(f64, f64)>,
+    done: bool,
+}
+
+impl SeatHandler for PointerState {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer
+            && self.pointer.is_none()
+            && let Ok(ptr) = self.seat_state.get_pointer(qh, &seat)
+        {
+            self.pointer = Some(ptr);
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _conn: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer && self.pointer.is_some() {
+            self.pointer.take().unwrap().release();
+        }
+    }
+
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl PointerHandler for PointerState {
+    fn pointer_frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
+        use PointerEventKind::*;
+        for event in events {
+            match event.kind {
+                Enter { .. } | Motion { .. } => {
+                    self.position = Some(event.position);
+                    self.done = true;
+                }
+                Leave { .. } => {}
+                _ => {}
+            }
+        }
+    }
+}
+
+delegate_registry!(PointerState);
+delegate_seat!(PointerState);
+delegate_pointer!(PointerState);
+
+impl ProvidesRegistryState for PointerState {
+    registry_handlers!(SeatState);
+
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.registry_state
+    }
+}
+
+/// Query the current pointer position in surface-local logical coordinates.
+///
+/// Returns `None` if no pointer device is available or if the pointer
+/// is not currently over any surface.
+pub fn get_pointer_position() -> Result<Option<(f64, f64)>> {
+    if std::env::var("WAYLAND_DISPLAY").is_err() {
+        return Ok(None);
+    }
+
+    let conn =
+        Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
+
+    let (globals, mut event_queue) = registry_queue_init::<PointerState>(&conn)
+        .map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
+
+    let qh = event_queue.handle();
+    let registry_state = RegistryState::new(&globals);
+    let seat_state = SeatState::new(&globals, &qh);
+
+    let mut state = PointerState {
+        registry_state,
+        seat_state,
+        pointer: None,
+        position: None,
+        done: false,
+    };
+
+    // Dispatch events until we get a pointer enter/motion event or timeout.
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_millis(100);
+
+    while !state.done && start.elapsed() < timeout {
+        match event_queue.dispatch_pending(&mut state) {
+            Ok(0) => {
+                // No pending events; flush and wait briefly.
+                let _ = conn.flush();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    Ok(state.position)
 }
 
 /// Enumerate all connected Wayland outputs and return their metadata.
@@ -155,5 +290,22 @@ mod tests {
         }
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    /// Ensure that `get_pointer_position` safely returns None when WAYLAND_DISPLAY is absent.
+    #[test]
+    fn get_pointer_position_without_wayland_display() {
+        let old = std::env::var_os("WAYLAND_DISPLAY");
+        unsafe {
+            std::env::remove_var("WAYLAND_DISPLAY");
+        }
+        let result = get_pointer_position();
+        if let Some(v) = old {
+            unsafe {
+                std::env::set_var("WAYLAND_DISPLAY", v);
+            }
+        }
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 }

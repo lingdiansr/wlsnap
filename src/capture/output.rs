@@ -13,13 +13,16 @@ use crate::{
 /// Capture the current pointer output (single screen).
 ///
 /// 1. Enumerate outputs via `wayland::enumerate_outputs()`
-/// 2. Determine current output via `capture::current_output()` (pointer fallback to first)
-/// 3. Connect to Wayland via `Connection::connect_to_env()`
-/// 4. Call `wlr::capture_output(conn, &output, overlay_cursor)`
-/// 5. Return `CapturedImage`
+/// 2. Query pointer position via `wayland::get_pointer_position()`
+/// 3. Determine current output via `capture::current_output()` (pointer fallback to first)
+/// 4. Connect to Wayland via `Connection::connect_to_env()`
+/// 5. Call `wlr::capture_output(conn, &output, overlay_cursor)`
+/// 6. Return `CapturedImage`
 pub async fn capture_current_screen(overlay_cursor: bool) -> Result<CapturedImage> {
     let outputs = wayland::enumerate_outputs()?;
-    let output = current_output(&outputs, None).ok_or(WlsnapError::NoOutputDetected)?;
+    let pointer_pos = wayland::get_pointer_position()?;
+    let output = current_output(&outputs, pointer_pos)
+        .ok_or(WlsnapError::NoOutputDetected)?;
 
     let conn =
         Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;
