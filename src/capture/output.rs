@@ -5,7 +5,7 @@ use wayland_client::Connection;
 
 use crate::{
     backend::wlr,
-    capture::{CapturedImage, current_output},
+    capture::CapturedImage,
     error::{Result, WlsnapError},
     platform::{output_info::OutputInfo, wayland},
 };
@@ -20,9 +20,18 @@ use crate::{
 /// 6. Return `CapturedImage`
 pub async fn capture_current_screen(overlay_cursor: bool) -> Result<CapturedImage> {
     let outputs = wayland::enumerate_outputs()?;
-    let pointer_pos = wayland::get_pointer_position()?;
-    let output = current_output(&outputs, pointer_pos)
-        .ok_or(WlsnapError::NoOutputDetected)?;
+
+    // Try to find the focused output via compositor IPC, fall back to first output
+    let output = if let Some(focused_name) = wayland::get_focused_output_name() {
+        outputs
+            .iter()
+            .find(|o| o.name == focused_name)
+            .cloned()
+            .or_else(|| outputs.first().cloned())
+    } else {
+        outputs.first().cloned()
+    }
+    .ok_or(WlsnapError::NoOutputDetected)?;
 
     let conn =
         Connection::connect_to_env().map_err(|e| WlsnapError::WaylandConnect(e.to_string()))?;

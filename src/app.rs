@@ -240,7 +240,7 @@ mod tests {
             mode: wlsnap::cli::CaptureMode {
                 screen: true,
                 all_screen: false,
-                range: None,
+                range: false,
                 window: false,
                 pin: None,
                 scroll_auto: false,
@@ -260,7 +260,7 @@ mod tests {
             mode: wlsnap::cli::CaptureMode {
                 screen: true,
                 all_screen: false,
-                range: None,
+                range: false,
                 window: false,
                 pin: None,
                 scroll_auto: false,
@@ -280,7 +280,7 @@ mod tests {
             mode: wlsnap::cli::CaptureMode {
                 screen: true,
                 all_screen: false,
-                range: None,
+                range: false,
                 window: false,
                 pin: None,
                 scroll_auto: false,

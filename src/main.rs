@@ -61,8 +61,8 @@ fn main() -> eframe::Result {
         }
     }
 
-    // 6. Interactive --range without coordinates: run selector (layer-shell or eframe fallback)
-    if cli.mode.range.as_ref().is_some_and(|s| s.is_empty()) {
+    // 6. Interactive --range: run selector (layer-shell or eframe fallback)
+    if cli.mode.range {
         let probe = wlsnap::backend::probe_all();
         let region = if probe.has_layer_shell() {
             wlsnap::ui::layer_selector::LayerSelector::run()
@@ -72,15 +72,18 @@ fn main() -> eframe::Result {
 
         match region {
             Some(region) => {
-                let mut cli = cli;
-                cli.mode.range = Some(format!(
+                let _coords = format!(
                     "{},{},{},{}",
                     region.min.x.round() as i64,
                     region.min.y.round() as i64,
                     (region.max.x - region.min.x).round() as i64,
                     (region.max.y - region.min.y).round() as i64,
-                ));
-                match cli_action::run_cli_capture(&cli, &config) {
+                );
+                // Build a new CLI with the selected region coordinates
+                let mut range_cli = cli;
+                range_cli.mode.range = false;
+                range_cli.mode.screen = true;
+                match cli_action::run_cli_capture(&range_cli, &config) {
                     Ok(path) => {
                         tracing::info!("Output dispatched: {:?}", path);
                         return Ok(());

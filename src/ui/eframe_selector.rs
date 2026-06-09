@@ -70,10 +70,16 @@ impl EframeSelector {
             return None;
         }
 
-        // 2. Select output based on pointer position
-        let pointer_pos = crate::platform::wayland::get_pointer_position().ok().flatten();
-        let output = crate::capture::current_output(&outputs, pointer_pos)
-            .unwrap_or_else(|| outputs.first().cloned().unwrap());
+        // 2. Select output based on compositor focus
+        let output = if let Some(focused_name) = crate::platform::wayland::get_focused_output_name() {
+            outputs
+                .iter()
+                .find(|o| o.name == focused_name)
+                .cloned()
+                .unwrap_or_else(|| outputs.first().cloned().unwrap())
+        } else {
+            outputs.first().cloned().unwrap()
+        };
 
         let (tx, rx) = mpsc::channel();
 
